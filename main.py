@@ -12,6 +12,10 @@ from core.session import SessionStore
 
 
 def build_adapter():
+    if os.environ.get("ADAPTER") == "kf":
+        # 微信客服（官方合规 1:1，公网回调）
+        from adapters.wecom_kf import WecomKfAdapter
+        return WecomKfAdapter()
     if os.environ.get("MOCK") == "1":
         from adapters.mock_cli import MockCliAdapter
         return MockCliAdapter(script_path=os.environ.get("MOCK_SCRIPT"))
@@ -19,11 +23,33 @@ def build_adapter():
     return NtworkWecomAdapter()
 
 
+def build_knowledge():
+    """按 KNOWLEDGE_PROVIDER 选知识后端；返回 None 则沿用 LLMHandler 内置默认(Static)。
+
+    取值：static（默认）| rag（向量检索）| structured（结构化商品库精确查价/规格）
+    | hybrid（结构化商品 + 全量知识兜底）。
+    换后端只动这里——LLMHandler 只依赖 KnowledgeProvider.retrieve(query)。
+    """
+    kind = os.environ.get("KNOWLEDGE_PROVIDER", "static").lower()
+    if kind == "rag":
+        from core.knowledge import RagKnowledgeProvider
+        return RagKnowledgeProvider()
+    if kind == "structured":
+        from core.knowledge import StructuredKnowledgeProvider
+        return StructuredKnowledgeProvider()
+    if kind == "hybrid":
+        from core.knowledge import (HybridKnowledgeProvider,
+                                     StaticKnowledgeProvider,
+                                     StructuredKnowledgeProvider)
+        return HybridKnowledgeProvider(StructuredKnowledgeProvider(), StaticKnowledgeProvider())
+    return None  # static / 未知 → 用 LLMHandler 默认的 StaticKnowledgeProvider
+
+
 def build_handler():
     handler_type = os.environ.get("HANDLER", "echo")
     if handler_type == "llm":
         from core.llm_handler import LLMHandler
-        return LLMHandler()
+        return LLMHandler(knowledge=build_knowledge())
     from core.handler import EchoHandler
     return EchoHandler()
 
