@@ -7,11 +7,12 @@ from __future__ import annotations
 
 import time
 from collections import OrderedDict
+from typing import Callable
 
 from .adapter import Adapter
 from .handler import Handler
 from .message import Message, BOT_SENDER_ID
-from .session import SessionStore
+from .session import Session, SessionStore
 
 DEDUP_MAX = 5000          # 去重表最多记住多少个 msg_id
 MIN_INTERVAL_SEC = 2.0    # 每个会话两次回复之间的最小间隔
@@ -31,11 +32,13 @@ def should_respond(msg: Message) -> bool:
 
 class Router:
     def __init__(self, adapter: Adapter, handler: Handler, sessions: SessionStore,
-                 *, min_interval_sec: float = MIN_INTERVAL_SEC) -> None:
+                 *, min_interval_sec: float = MIN_INTERVAL_SEC,
+                 on_escalate: Callable[[Session], None] | None = None) -> None:
         self.adapter = adapter
         self.handler = handler
         self.sessions = sessions
         self.min_interval_sec = min_interval_sec
+        self.on_escalate = on_escalate  # agent 判定需人工时回调（通知工作台等）
         self._seen: "OrderedDict[str, None]" = OrderedDict()  # 去重（有序，便于淘汰最旧）
         self._last_reply_at: dict[str, float] = {}            # chat_id -> 上次回复时间
 
@@ -62,6 +65,10 @@ class Router:
         session = self.sessions.get(msg.chat_id)
         session.add(msg)
 
+        # 人工已接管：agent 静默，只记录消息、不自动回复
+        if session.human_controlled:
+            return
+
         # 2) 触发判断
         if not should_respond(msg):
             return
@@ -71,7 +78,7 @@ class Router:
         if self._rate_limited(msg.chat_id, now):
             return
 
-        # 4) 生成回复
+        # 4) 生成回复（handler 可能在 session 上标记 needs_human）
         reply = self.handler.reply(msg, session)
         if not reply:
             return
@@ -88,3 +95,10 @@ class Router:
             content=reply,
             msg_type="text",
         ))
+
+        # 6) 若本轮 agent 判定需人工，触发升级回调（通知工作台等）
+        if session.needs_human and self.on_escalate is not None:
+            try:
+                self.on_escalate(session)
+            except Exception:  # noqa: BLE001 - 回调失败不影响主链路
+                pass

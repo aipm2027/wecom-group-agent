@@ -20,6 +20,9 @@ from .session import Session
 # 项目根目录（core/ 的上一级），用于解析 persona 相对路径
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# 转人工控制标记：模型决定转人工时在回复末尾追加，会被剥离后再发给客户
+ESCALATE_TAG = "[[转人工]]"
+
 
 class LLMHandler(Handler):
     """用 LLM 生成回复，支持多轮历史上下文。
@@ -93,13 +96,23 @@ class LLMHandler(Handler):
         # transport 注入优先（离线测试/自定义后端），短路掉真实网络与 key 校验
         if self._transport is not None:
             result = self._transport(messages)
-            return result if isinstance(result, str) and result else self._fallback
-
-        if not self._api_key:
+            text = result if isinstance(result, str) and result else self._fallback
+        elif not self._api_key:
             print("[LLMHandler] 未配置 LLM_API_KEY，使用兜底话术", file=sys.stderr)
-            return self._fallback
+            text = self._fallback
+        else:
+            text = self._call_api(messages)
 
-        return self._call_api(messages)
+        return self._postprocess(text, session)
+
+    def _postprocess(self, text: str, session: Session) -> str:
+        """剥离转人工控制标记并在 session 上打"需人工"标记，返回可直接发送的干净文本。"""
+        if text and ESCALATE_TAG in text:
+            session.needs_human = True
+            if not session.escalation_reason:
+                session.escalation_reason = "agent 判定需人工介入"
+            text = text.replace(ESCALATE_TAG, "").strip()
+        return text or self._fallback
 
     def _build_messages(self, system: str, session: Session) -> list[dict]:
         """组装 system + 最近 N 条历史。
