@@ -314,3 +314,95 @@ class RagKnowledgeProvider(KnowledgeProvider):
                     return f.read()
             except OSError:
                 return ""
+
+
+class StructuredKnowledgeProvider(KnowledgeProvider):
+    """结构化商品库：按关键词/属性精确匹配（非向量语义），适合查价/规格/库存。"""
+
+    def __init__(self, path: str = "prompts/products.json", products: list[dict] | None = None) -> None:
+        self._path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+        if products is not None:
+            self._products = products
+        else:
+            self._products = self._load_from_file()
+
+    def _load_from_file(self) -> list[dict]:
+        try:
+            with open(self._path, encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                return data
+            print("[StructuredKnowledgeProvider] JSON 根不是数组，视为空列表", file=sys.stderr)
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"[StructuredKnowledgeProvider] 读取商品文件失败，已降级为空列表: {exc}", file=sys.stderr)
+        except Exception as exc:
+            print(f"[StructuredKnowledgeProvider] 未知错误，已降级为空列表: {exc}", file=sys.stderr)
+        return []
+
+    def _is_hit(self, product: dict, query: str) -> bool:
+        """判断商品是否命中 query：name / product_id / category / keywords 任一作为子串出现。"""
+        q = query.lower()
+        for field in ("name", "product_id", "category"):
+            val = product.get(field, "")
+            if isinstance(val, str) and val.lower() in q:
+                return True
+        for kw in (product.get("keywords") or []):
+            if isinstance(kw, str) and kw.lower() in q:
+                return True
+        return False
+
+    def _format_product(self, product: dict) -> str:
+        """将单条商品格式化为结构化文本。"""
+        lines = [
+            f"名称：{product.get('name', '')}",
+            f"价格：¥{product.get('price', '')}",
+            f"规格：{product.get('spec', '')}",
+            f"库存：{product.get('stock', '')}",
+        ]
+        promo = product.get("promotion", "")
+        if promo:
+            lines.append(f"促销：{promo}")
+        status = product.get("status", "")
+        status_cn = {"on_sale": "在售", "off_sale": "已下架", "out_of_stock": "已售罄"}.get(status, status)
+        if status_cn:
+            lines.append(f"状态：{status_cn}")
+        return " | ".join(lines)
+
+    def retrieve(self, query: str) -> str:
+        try:
+            hits = [p for p in self._products if self._is_hit(p, query)]
+            if not hits:
+                return ""
+            lines = ["# 命中商品(精确查询,以此为准)"]
+            for p in hits:
+                lines.append(self._format_product(p))
+            return "\n".join(lines)
+        except Exception as exc:
+            print(f"[StructuredKnowledgeProvider] 检索异常，已降级: {exc}", file=sys.stderr)
+            return ""
+
+
+class HybridKnowledgeProvider(KnowledgeProvider):
+    """混合知识：先结构化查商品，再 fallback 语义/全量查 FAQ。"""
+
+    def __init__(self, primary: KnowledgeProvider, fallback: KnowledgeProvider) -> None:
+        self._primary = primary
+        self._fallback = fallback
+
+    def retrieve(self, query: str) -> str:
+        primary_text = ""
+        fallback_text = ""
+        try:
+            primary_text = self._primary.retrieve(query)
+        except Exception as exc:
+            print(f"[HybridKnowledgeProvider] primary 检索失败: {exc}", file=sys.stderr)
+        try:
+            fallback_text = self._fallback.retrieve(query)
+        except Exception as exc:
+            print(f"[HybridKnowledgeProvider] fallback 检索失败: {exc}", file=sys.stderr)
+
+        if primary_text and fallback_text:
+            return f"{primary_text}\n\n{fallback_text}"
+        if primary_text:
+            return primary_text
+        return fallback_text

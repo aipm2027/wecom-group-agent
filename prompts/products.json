@@ -1,0 +1,112 @@
+[
+  {
+    "product_id": "SKU001",
+    "name": "每日坚果礼盒 30 包",
+    "category": "坚果礼盒",
+    "price": 99,
+    "spec": "30 包/盒，每包 25g",
+    "stock": 500,
+    "promotion": "老客私域专享复购价 ¥99（日常 ¥129）",
+    "keywords": ["每日坚果", "坚果礼盒", "礼盒", "30 包", "老客价"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU002",
+    "name": "每日坚果礼盒 7 天装",
+    "category": "坚果礼盒",
+    "price": 39,
+    "spec": "7 包/盒，每包 25g",
+    "stock": 200,
+    "promotion": "",
+    "keywords": ["每日坚果", "7 天装", "试吃", "小包装"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU003",
+    "name": "冻干榴莲 100g",
+    "category": "冻干零食",
+    "price": 45,
+    "spec": "100g/袋",
+    "stock": 120,
+    "promotion": "",
+    "keywords": ["冻干", "榴莲", "水果干", "100g"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU004",
+    "name": "鲜烤腰果 200g",
+    "category": "坚果炒货",
+    "price": 59,
+    "spec": "200g/罐",
+    "stock": 80,
+    "promotion": "满 199 减 30 可凑单",
+    "keywords": ["腰果", "鲜烤", "坚果", "200g", "罐装"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU005",
+    "name": "冻干草莓 100g",
+    "category": "冻干零食",
+    "price": 42,
+    "spec": "100g/袋",
+    "stock": 60,
+    "promotion": "",
+    "keywords": ["冻干", "草莓", "水果干", "100g"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU006",
+    "name": "夏威夷果 150g",
+    "category": "坚果炒货",
+    "price": 68,
+    "spec": "150g/罐",
+    "stock": 150,
+    "promotion": "",
+    "keywords": ["夏威夷果", "坚果", "150g", "罐装"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU007",
+    "name": "碧根果 200g",
+    "category": "坚果炒货",
+    "price": 55,
+    "spec": "200g/罐",
+    "stock": 0,
+    "promotion": "",
+    "keywords": ["碧根果", "坚果", "200g", "罐装"],
+    "status": "out_of_stock"
+  },
+  {
+    "product_id": "SKU008",
+    "name": "巴旦木 250g",
+    "category": "坚果炒货",
+    "price": 49,
+    "spec": "250g/袋",
+    "stock": 300,
+    "promotion": "",
+    "keywords": ["巴旦木", "杏仁", "坚果", "250g"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU009",
+    "name": "芒果干 200g",
+    "category": "果脯蜜饯",
+    "price": 38,
+    "spec": "200g/袋",
+    "stock": 90,
+    "promotion": "",
+    "keywords": ["芒果干", "果脯", "水果干", "200g"],
+    "status": "on_sale"
+  },
+  {
+    "product_id": "SKU010",
+    "name": "海苔脆 100g",
+    "category": "休闲零食",
+    "price": 25,
+    "spec": "100g/盒",
+    "stock": 0,
+    "promotion": "",
+    "keywords": ["海苔", "海苔脆", "零食", "100g"],
+    "status": "off_sale"
+  }
+]
