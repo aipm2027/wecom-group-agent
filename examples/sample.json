@@ -1,0 +1,8 @@
+[
+  {"chat_id": "群A", "sender_name": "张三", "msg_id": "m1", "content": "@bot 你好"},
+  {"chat_id": "群A", "sender_name": "李四", "msg_id": "m2", "content": "@bot 在吗"},
+  {"chat_id": "群A", "sender_name": "王五", "msg_id": "m3", "content": "今天天气不错"},
+  {"chat_id": "群B", "sender_name": "赵六", "msg_id": "m4", "content": "@bot 帮我下单"},
+  {"chat_id": "群B", "sender_name": "赵六", "msg_id": "m4", "content": "@bot 帮我下单"},
+  {"chat_id": "私聊-客户A", "chat_type": "single", "sender_name": "客户A", "msg_id": "m6", "content": "价格多少"}
+]
