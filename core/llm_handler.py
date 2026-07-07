@@ -108,9 +108,7 @@ class LLMHandler(Handler):
     def _postprocess(self, text: str, session: Session) -> str:
         """剥离转人工控制标记并在 session 上打"需人工"标记，返回可直接发送的干净文本。"""
         if text and ESCALATE_TAG in text:
-            session.needs_human = True
-            if not session.escalation_reason:
-                session.escalation_reason = "agent 判定需人工介入"
+            session.mark_needs_human("agent 判定需人工介入")
             text = text.replace(ESCALATE_TAG, "").strip()
         return text or self._fallback
 
