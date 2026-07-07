@@ -122,6 +122,17 @@ def test_bad_json() -> None:
     assert st == 400, "坏 JSON 应 400"
 
 
+def test_queue_lists_needs_human_unclaimed() -> None:
+    sessions = SessionStore()
+    sessions.get("u1").mark_needs_human("投诉")             # 待接管 → 在队列
+    sessions.get("u2").take_over()                           # 已接管 → 不在队列
+    s3 = sessions.get("u3"); s3.mark_needs_human("退款"); s3.take_over()  # 接管后清标记 → 不在
+    st, pl = _app(sessions).handle("GET", "/api/queue", b"", AUTH)
+    assert st == 200
+    ids = [c["chat_id"] for c in pl["queue"]]
+    assert ids == ["u1"], f"队列只应含待接管的 u1，实际 {ids}"
+
+
 def main() -> None:
     for fn in (
         test_health_no_auth,
@@ -133,6 +144,7 @@ def main() -> None:
         test_config_no_key_leak,
         test_metrics_and_404,
         test_bad_json,
+        test_queue_lists_needs_human_unclaimed,
     ):
         fn()
         print(f"通过: {fn.__name__}")

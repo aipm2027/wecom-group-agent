@@ -80,6 +80,10 @@ class ApiApp:
                     return 200, {"ok": True, "chat_id": chat_id, "human_controlled": False}
             if path == "/api/agent/preview" and method == "POST":
                 return self._preview(self._json(body))
+            if path == "/api/queue" and method == "GET":
+                # 人工工作台收件箱：agent 判定需人工、且尚未被接管的会话
+                return 200, {"queue": [self._conv_summary(s) for s in self.sessions.all()
+                                       if s.needs_human and not s.human_controlled]}
             if path == "/api/config" and method == "GET":
                 return 200, self._config()
             if path == "/api/metrics" and method == "GET":
