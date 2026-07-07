@@ -17,7 +17,7 @@
                                         │ HTTP/REST
                                         ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           API 层（规划）                                    │
+│                           API 层（已实现）                                   │
 │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────────┐   │
 │  │ 会话管理    │  │ 知识管理    │  │ 人设/配置   │  │ 人工接管工单    │   │
 │  │  端点      │  │  端点      │  │  端点      │  │  端点          │   │
@@ -38,10 +38,10 @@
 │                 │                                  │                        │
 │                 ▼ reply()                          ▼ session               │
 │  ┌────────────────────────────┐      ┌──────────────────────────┐       │
-│  │  Handler（可插拔）          │      │  SessionStore（内存版）   │       │
+│  │  Handler（可插拔）          │      │  SessionStore（内存/SQLite）│       │
 │  │  ┌──────────────────────┐  │      │  按 chat_id 隔离          │       │
-│  │  │ EchoHandler（占位）   │  │      │  deque(maxlen=20)         │       │
-│  │  │ LLMHandler（真大脑）  │  │      │  扩展点：SQLite/Redis      │       │
+│  │  │ EchoHandler（占位）   │  │      │  内存: deque(maxlen=20)  │       │
+│  │  │ LLMHandler（真大脑）  │  │      │  SQLite: 写穿透+重启恢复  │       │
 │  │  └──────────────────────┘  │      └──────────────────────────┘       │
 │  │  ┌──────────────────────┐  │                                         │
 │  │  │ KnowledgeProvider     │  │                                         │
@@ -65,16 +65,16 @@
 └────────────────────────────────────────────────────────────────────────────┘
 
                                ┌────────────────────┐
-                               │   旁路模块（规划）   │
+                               │ 旁路模块（部分已实现）│
 ┌──────────────────────────────┴────────────────────┴──────────────────────────┐
 │  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐  ┌────────────────┐ │
 │  │ 人工接管工作台  │  │ 知识管理后台   │  │ 配置中心       │  │ 指标/事件管道  │ │
 │  │  • 工单队列     │  │  • 知识上传    │  │  • 人设/提示词  │  │  • 埋点采集    │ │
 │  │  • 人工回复     │  │  • 商品结构化  │  │  • 系统参数    │  │  • 实时看板    │ │
 │  │  • 接管/释放    │  │  • 索引管理    │  │  • 开关/阈值   │  │  • 离线分析    │ │
+│  │  【已实现】     │  │  【规划】      │  │  【规划】      │  │  【规划】      │ │
 │  └────────────────┘  └────────────────┘  └────────────────┘  └────────────────┘ │
-│              ↑↑↑↑↑↑↑↑↑↑↑↑↑↑ 以上均为规划，尚未实现 ↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑↑  │
-└────────────────────────────────────────────────────────────────────────────┘
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### 关键架构决策
@@ -82,7 +82,7 @@
 | 决策 | 说明 |
 |------|------|
 | **传输无关三层** | 传输适配器 ↔ Router ↔ Handler/Session，任何一层替换不影响其余层。 |
-| **零依赖核心** | `core/` 纯 Python 标准库，LLM 调用用 `urllib`，无 `fastapi`/`sqlalchemy`/`redis` 等强依赖。规划中的 SQLite / HTTP 层作为可选扩展，不污染核心。 |
+| **零依赖核心** | `core/` 纯 Python 标准库，LLM 调用用 `urllib`，无 `fastapi`/`sqlalchemy`/`redis` 等强依赖。SQLite / HTTP 层作为可选扩展，不污染核心。 |
 | **可插拔知识模块** | `KnowledgeProvider` 抽象基类（`retrieve(query)`），当前默认 `StaticKnowledgeProvider`（全量提示词直塞）；以后无缝换 `RagKnowledgeProvider`（向量检索），`LLMHandler` 一行不改。详见 [core/knowledge.py](../../core/knowledge.py)。 |
 | **前端仅按 API 契约对接** | 运营后台前端由调用方自行开发，本项目只提供 REST API 契约与鉴权说明。 |
 
@@ -97,14 +97,14 @@
 | Mock 适配器 | `adapters/mock_cli.py` | ✅ 已实现 | — | 交互/脚本两种模式，Mac 本地验证 |
 | Ntwork 适配器 | `adapters/ntwork_wecom.py` | 🟡 Stub | 待 Windows 实机 | 文件顶部注释已写实现框架，当前抛 `NotImplementedError` |
 | 微信客服适配器 | — | ❌ 无 | 规划中 | 官方合规 1:1，需公网回调+AES 解密 |
-| Router | `core/router.py` | ✅ 已实现 | — | 去重/触发/限流/回发/记忆流水线 |
+| Router | `core/router.py` | ✅ 已实现 | — | 去重/触发/限流/回发/记忆流水线；已支持 `human_controlled` 静默逻辑 |
 | Handler 抽象 | `core/handler.py` | ✅ 已实现 | — | `EchoHandler` 占位 + `LLMHandler` 真大脑 |
-| LLMHandler | `core/llm_handler.py` | ✅ 已实现 | 持续优化 | 纯 `urllib` 调 OpenAI 兼容接口；system prompt 三级组装；支持 `transport` 注入测试 |
+| LLMHandler | `core/llm_handler.py` | ✅ 已实现 | 持续优化 | 纯 `urllib` 调 OpenAI 兼容接口；system prompt 三级组装；识别 `[[转人工]]` 控制标记并剥离；支持 `transport` 注入测试 |
 | KnowledgeProvider | `core/knowledge.py` | ✅ 骨架已落地 | 规模化后实现 RAG | `StaticKnowledgeProvider` 默认可用；`RagKnowledgeProvider` 抛 `NotImplementedError` |
-| Session/SessionStore | `core/session.py` | ✅ 内存版已实现 | 规划 SQLite 持久化 | `deque(maxlen=20)`，扩展点已留 |
-| 持久化(SQLite) | — | ❌ 无 | 规划 P1 | 保留 `MAX_CONTEXT` 淘汰语义 |
-| REST API 层 | — | ❌ 无 | 规划 P1 | 给前端运营后台，HTTP+JSON，ADMIN_TOKEN 鉴权 |
-| 人工接管流程 | — | ❌ 无 | 规划 P2 | 结构化 escalation 信号 + 工单队列 + 工作台接管 |
+| Session/SessionStore | `core/session.py` | ✅ 已实现 | — | `deque(maxlen=20)`；已扩展 `human_controlled`/`needs_human`/`escalation_reason` 字段及 `take_over()`/`release()`/`mark_needs_human()` |
+| 持久化(SQLite) | `core/session_sqlite.py` | ✅ 已实现 | — | `SqliteSessionStore` 与内存 `SessionStore` 同接口；写穿透透明持久化；`UNIQUE(chat_id,msg_id)` 去重；重启恢复最近 N 条历史与接管/转人工状态 |
+| REST API 层 | `api_server.py` | ✅ 已实现 | — | `ApiApp` 纯逻辑（无 socket，可离线单测）+ `stdlib http.server` 薄壳；ADMIN_TOKEN 鉴权；开发模式未配置时告警放行 |
+| 人工接管流程 | `core/session.py`, `core/router.py`, `core/llm_handler.py`, `prompts/persona.md` | ✅ 已实现 | — | 结构化 escalation 信号（`[[转人工]]` 标记→`mark_needs_human`→`on_escalate` 回调）；`human_controlled` 静默；API `takeover`/`release` |
 | 指标/事件管道 | — | ❌ 无 | 规划 P2 | 埋点采集、实时看板、离线分析 |
 | 结构化商品库 | — | ❌ 无 | 规划 P1 | 精确查价/规格/库存，与 RAG 互补 |
 | 配置中心 | — | ❌ 无 | 规划 P2 | 动态调参，无需重启进程 |
@@ -140,6 +140,9 @@
 | `chat_id` | `str` | 会话唯一标识 |
 | `history` | `deque[Message]` | 最近 `MAX_CONTEXT=20` 条消息，自动淘汰旧记录 |
 | `state` | `dict` | 预留字典，未来可存放会话阶段（如"已询价→待下单"）、用户标签等 |
+| `human_controlled` | `bool` | **现状新增。** 是否处于人工接管态；为 `True` 时 agent 静默不回 |
+| `needs_human` | `bool` | **现状新增。** 是否已触发转人工（`[[转人工]]` 标记）；用于人工工作台收件箱 |
+| `escalation_reason` | `str` | **现状新增。** 转人工原因摘要，由 LLM 在 `[[转人工]]` 时附带 |
 
 源码：`core/session.py`（[查看](../../core/session.py)）。
 
@@ -157,7 +160,7 @@
 
 > 规划理由：持久化后，从会话历史聚合客户画像，支持运营后台做客户分层。
 
-### 3.4 消息记录（MessageRecord）—— 📋 规划
+### 3.4 消息记录（MessageRecord）—— 🏷 现状：SQLite 已持久化
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -173,7 +176,9 @@
 | `is_bot` | `bool` | 是否机器人发送 |
 | `created_at` | `datetime` | 入库时间 |
 
-> 规划理由：将 `Session.history` 从内存 `deque` 迁移到 SQLite，保留历史记录用于审计、多轮上下文恢复和指标统计。
+> **现状说明**：`core/session_sqlite.py` 中 `messages` 表已按上述结构落地，并设 `UNIQUE(chat_id, msg_id)` 去重约束。`SqliteSessionStore` 通过 `Session` 写穿透钩子（`on_message`/`on_flags`）透明持久化，Router 与 Handler 零改动。
+
+源码：`core/session_sqlite.py`（[查看](../../core/session_sqlite.py)）。
 
 ### 3.5 商品（Product）—— 📋 规划
 
@@ -206,7 +211,7 @@
 
 > 规划理由：替换 `prompts/knowledge.md` 的纯文本方式，支持 FAQ 语义检索和增量更新。
 
-### 3.7 接管工单（EscalationTicket）—— 📋 规划
+### 3.7 接管工单（EscalationTicket）—— 📋 规划（现状用 session 字段替代）
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
@@ -220,6 +225,8 @@
 | `summary` | `text` | 自动摘要（agent 升级时的上下文） |
 | `created_at` | `datetime` | 创建时间 |
 | `resolved_at` | `datetime` | 结案时间（nullable） |
+
+> **现状说明**：当前未建独立工单表，转人工与接管状态直接保存在 `Session` 的 `needs_human`/`human_controlled`/`escalation_reason` 字段中，通过 REST API 暴露给前端。未来如需要工单历史审计、多客服分配、SLA 统计，可迁移至独立 `EscalationTicket` 表。
 
 ### 3.8 配置（Config）—— 📋 规划
 
@@ -245,86 +252,99 @@
 
 ## 4. REST API 契约（给前端团队）
 
-> ⚠️ **以下所有 API 端点均为规划，尚未实现。** 当前项目无 HTTP 服务层，计划 P1 引入轻量 HTTP 框架（如 `http.server` 或 `aiohttp`，均作为可选依赖，不污染零依赖核心）。
+> ✅ **以下 API 端点已在 `api_server.py` 实现。** 当前基于 `stdlib http.server` 线程模型，无 `fastapi`/`aiohttp` 等额外依赖；生产环境如需更高并发，可在外层加 Nginx 或替换为 ASGI 框架，但 `ApiApp` 纯逻辑层零改动。
+>
+> 源码：`api_server.py`（[查看](../../api_server.py)）。
 
 ### 4.1 统一鉴权说明
 
-所有端点（除健康检查外）在请求头中携带 `Authorization: Bearer <ADMIN_TOKEN>`。
+所有端点（除健康检查外）在请求头中携带 `Authorization: Bearer <ADMIN_TOKEN>`，或 `X-Admin-Token: <ADMIN_TOKEN>`。
 - `ADMIN_TOKEN` 从环境变量读取（`.env` 中 `ADMIN_TOKEN=...`），进程启动时加载，重启生效。
-- 未提供或 token 不匹配时返回 `401 Unauthorized`。
+- **未配置 `ADMIN_TOKEN` 时**：开发模式自动放行并打印告警日志（`WARNING: ADMIN_TOKEN not set, API is open to everyone`），方便本地调试。
+- Token 不匹配时返回 `401 Unauthorized`。
 - 规划后续可扩展为 RBAC（区分运营/管理员/只读）。
 
 ### 4.2 会话管理
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/v1/sessions` | 会话列表（分页） | `?page=1&size=20&status=active`；返回 `chat_id`、`last_active_at`、`msg_count` 等 |
-| `GET` | `/api/v1/sessions/{chat_id}` | 会话详情 | 返回完整会话历史（最近 N 条） |
-| `GET` | `/api/v1/sessions/{chat_id}/messages` | 会话消息流 | `?limit=20&offset=0`；按时间正序/倒序 |
-| `POST` | `/api/v1/sessions/{chat_id}/send` | 运营后台主动发消息 | `{"content":"..."}`；通过适配器发送，记入 session |
-| `DELETE` | `/api/v1/sessions/{chat_id}` | 清空/删除会话 | 软删除，保留历史记录用于审计 |
+| `GET` | `/api/health` | 健康检查 | **免鉴权。** 返回 `{"status":"ok"}` |
+| `GET` | `/api/conversations` | 会话列表 | 返回全部会话的 `chat_id`、`last_active_at`、`msg_count`、`human_controlled`、`needs_human` 等摘要 |
+| `GET` | `/api/conversations/{id}` | 会话详情 | 返回完整会话历史（最近 N 条） |
+| `GET` | `/api/conversations/{id}/messages` | 会话消息流 | 按时间正序返回消息列表 |
+| `POST` | `/api/conversations/{id}/messages` | 人工发消息 | `{"content":"...","sender_name":"人工客服"}`；通过 adapter 发送，记入 session |
+| `POST` | `/api/conversations/{id}/takeover` | 人工接管 | 设置 `human_controlled=True`，agent 静默 |
+| `POST` | `/api/conversations/{id}/release` | 释放回 agent | 设置 `human_controlled=False`，agent 恢复自动回复 |
 
-### 4.3 知识管理
-
-| 方法 | 路径 | 用途 | 请求/响应要点 |
-|------|------|------|---------------|
-| `GET` | `/api/v1/knowledge` | 查看当前知识 | 返回 `prompts/knowledge.md` 文本（Static 阶段）或 FAQ 列表（P1 后） |
-| `PUT` | `/api/v1/knowledge` | 全量更新知识 | `{"content":"..."}`；覆盖 `knowledge.md`；触发 LLMHandler 重新加载（若运行中） |
-| `POST` | `/api/v1/faqs` | 新增 FAQ（P1 后） | `{"question":"...","answer":"...","category":"..."}` |
-| `PUT` | `/api/v1/faqs/{faq_id}` | 修改 FAQ | 同上 |
-| `DELETE` | `/api/v1/faqs/{faq_id}` | 删除/归档 FAQ | 软删除 |
-| `POST` | `/api/v1/faqs/search` | FAQ 语义检索（P2 后） | `{"query":"...","top_k":5}`；调用 RagKnowledgeProvider 检索 |
-
-### 4.4 商品库（结构化）
+### 4.3 人工工作台队列
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/v1/products` | 商品列表 | `?category=...&status=...&q=关键词`；支持关键词过滤 |
-| `GET` | `/api/v1/products/{product_id}` | 商品详情 | 返回完整商品信息 |
-| `POST` | `/api/v1/products` | 新增商品 | 完整商品字段 |
-| `PUT` | `/api/v1/products/{product_id}` | 更新商品 | 部分更新支持 |
-| `DELETE` | `/api/v1/products/{product_id}` | 删除商品 | 软删除 |
+| `GET` | `/api/queue` | 人工工作台收件箱 | 返回 `needs_human=True` 且 `human_controlled=False`（未接管）的会话列表，按 `last_active_at` 倒序 |
 
-### 4.5 人设与配置
+> 说明：`/api/queue` 是运营后台"待处理"视图的核心接口，客服先从此列表取会话，再调用 `takeover` 接管。
+
+### 4.4 知识管理
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/v1/persona` | 查看当前人设 | 返回 `prompts/persona.md` 文本 |
-| `PUT` | `/api/v1/persona` | 更新人设 | `{"content":"..."}`；覆盖 `persona.md`；热重载（LLMHandler 重新读取） |
-| `GET` | `/api/v1/config` | 查看全部配置 | 返回 key-value 列表 |
-| `PUT` | `/api/v1/config/{key}` | 更新单项配置 | `{"value":"..."}`；如 `rate_limit_sec`、`dedup_max` 等 |
-| `POST` | `/api/v1/config/reload` | 强制重新加载配置 | 重新读取 `.env` 与 `prompts/` 目录文件 |
+| `GET` | `/api/knowledge` | 查看当前知识 | 返回 `prompts/knowledge.md` 文本（Static 阶段） |
+| `PUT` | `/api/knowledge` | 全量更新知识 | `{"content":"..."}`；覆盖 `knowledge.md`；触发 LLMHandler 重新加载（若运行中） |
 
-### 4.6 人工接管
+> FAQ 增删改查、语义检索端点目前未实现，保留规划（P2）。
 
-| 方法 | 路径 | 用途 | 请求/响应要点 |
-|------|------|------|---------------|
-| `GET` | `/api/v1/tickets` | 工单列表 | `?status=open&assigned_to=me`；分页 |
-| `GET` | `/api/v1/tickets/{ticket_id}` | 工单详情 | 包含客户摘要、会话历史、升级原因 |
-| `POST` | `/api/v1/tickets/{ticket_id}/takeover` | 人工接管 | 设置 `agent_id`，状态变为 `assigned`；该会话进入人工接管态 |
-| `POST` | `/api/v1/tickets/{ticket_id}/reply` | 人工回复 | `{"content":"..."}`；通过适配器发送 |
-| `POST` | `/api/v1/tickets/{ticket_id}/release` | 释放回 agent | 状态变为 `resolved`，agent 恢复自动回复 |
-| `POST` | `/api/v1/tickets/{ticket_id}/cancel` | 取消工单 | 状态变为 `cancelled`，agent 恢复 |
-| `GET` | `/api/v1/tickets/stats` | 工单统计 | 今日待处理、平均响应时长、已解决数等 |
-
-### 4.7 指标与看板
+### 4.5 商品库（结构化）—— 规划
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/v1/metrics/dashboard` | 实时看板 | 今日消息量、回复量、触发率、LLM 错误率、人工接管率等 |
-| `GET` | `/api/v1/metrics/events` | 事件查询 | `?type=reply&chat_id=...&from=...&to=...`；分页 |
-| `GET` | `/api/v1/metrics/llm_stats` | LLM 调用统计 | 调用次数、平均延迟、降级次数、token 消耗（估算） |
-| `POST` | `/api/v1/metrics/events` | 手动上报（测试用） | 内部使用 |
+| `GET` | `/api/products` | 商品列表 | `?category=...&status=...&q=关键词`；支持关键词过滤 |
+| `GET` | `/api/products/{product_id}` | 商品详情 | 返回完整商品信息 |
+| `POST` | `/api/products` | 新增商品 | 完整商品字段 |
+| `PUT` | `/api/products/{product_id}` | 更新商品 | 部分更新支持 |
+| `DELETE` | `/api/products/{product_id}` | 删除商品 | 软删除 |
 
-### 4.8 Agent 预览与调试
+> 当前未实现，规划 P1。
+
+### 4.6 人设与配置
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `POST` | `/api/v1/preview/chat` | 单轮对话预览 | `{"messages":[{...}],"persona":"...","knowledge":"..."}`；调用 LLMHandler，不记入真实会话 |
-| `POST` | `/api/v1/preview/knowledge` | 知识检索预览 | `{"query":"..."}`；调用当前 KnowledgeProvider 的 `retrieve(query)`，返回命中内容 |
-| `POST` | `/api/v1/preview/product_match` | 商品匹配预览 | `{"query":"..."}`；返回结构化商品查询结果（P1 后） |
+| `GET` | `/api/persona` | 查看当前人设 | 返回 `prompts/persona.md` 文本 |
+| `PUT` | `/api/persona` | 更新人设 | `{"content":"..."}`；覆盖 `persona.md`；热重载（LLMHandler 重新读取） |
+| `GET` | `/api/config` | 查看全部配置 | 返回 key-value 列表（**不含密钥**，如 `LLM_API_KEY` 等敏感字段被过滤） |
+| `POST` | `/api/config/reload` | 强制重新加载配置 | 重新读取 `.env` 与 `prompts/` 目录文件 |
 
-### 4.9 响应格式
+> 动态调参（无需重启进程）保留规划（P2）。
+
+### 4.7 人工接管
+
+| 方法 | 路径 | 用途 | 请求/响应要点 |
+|------|------|------|---------------|
+| `GET` | `/api/queue` | 待处理队列 | 同 4.3，人工工作台收件箱 |
+| `POST` | `/api/conversations/{id}/takeover` | 人工接管 | 同 4.2 |
+| `POST` | `/api/conversations/{id}/release` | 释放回 agent | 同 4.2 |
+
+> 独立工单表（`EscalationTicket`）及统计端点保留规划（P2）。
+
+### 4.8 指标与看板—— 规划
+
+| 方法 | 路径 | 用途 | 请求/响应要点 |
+|------|------|------|---------------|
+| `GET` | `/api/metrics` | 实时指标 | 当前返回基础运行时计数（如消息总量、LLM 调用次数、错误次数）；完整看板保留规划（P2） |
+| `GET` | `/api/metrics/dashboard` | 实时看板 | 今日消息量、回复量、触发率、LLM 错误率、人工接管率等（规划 P2） |
+| `GET` | `/api/metrics/events` | 事件查询 | `?type=reply&chat_id=...&from=...&to=...`；分页（规划 P2） |
+| `GET` | `/api/metrics/llm_stats` | LLM 调用统计 | 调用次数、平均延迟、降级次数、token 消耗（估算）（规划 P2） |
+| `POST` | `/api/metrics/events` | 手动上报（测试用） | 内部使用（规划 P2） |
+
+### 4.9 Agent 预览与调试
+
+| 方法 | 路径 | 用途 | 请求/响应要点 |
+|------|------|------|---------------|
+| `POST` | `/api/agent/preview` | 单轮对话预览 | `{"messages":[...],"persona":"...","knowledge":"..."}`；调用 LLMHandler，**不记入真实会话** |
+
+> 知识检索预览、商品匹配预览端点保留规划（P1/P2）。
+
+### 4.10 响应格式
 
 统一返回 JSON：
 ```json
@@ -346,59 +366,50 @@
 
 ## 5. 人工接管流程
 
-> ⚠️ **人工接管工作台当前仅为规划，尚未实现。** Agent 目前遇到"需人工处理"场景时，以话术形式引导（如"稍等，我帮你转人工客服"），但**无结构化信号、无工单系统、无工作台**，仅停留在 LLM 生成的文本回复。
+> ✅ **人工接管后端已实现。** 当前通过 `Session` 字段 + `LLMHandler` 控制标记 + `Router` 回调 + REST API 完成结构化转人工与接管释放，无需独立工单表即可运行。前端运营后台按第 4 节 API 契约对接即可。
+>
+> 源码：`core/session.py`（[查看](../../core/session.py)）、`core/router.py`（[查看](../../core/router.py)）、`core/llm_handler.py`（[查看](../../core/llm_handler.py)）、`prompts/persona.md`（[查看](../../prompts/persona.md)）。
 
-### 5.1 目标流程（规划）
+### 5.1 现状：已实现流程
 
 ```
 客户提问（复杂/投诉/需查库存）
          │
          ▼
   ┌──────────────┐
-  │  LLMHandler  │  识别需人工介入（或通过关键词/规则触发）
-  │  生成结构化  │  输出 escalation_signal 而非纯话术
-  │  escalation │
+  │  LLMHandler  │  识别需人工介入
+  │  剥离控制标记 │  检测到回复中包含 [[转人工]]
+  │  ESCALATE_TAG│  从客户可见内容中剥离，仅保留结构化意图
   └──────┬───────┘
-         │ 结构化信号（JSON）
-         │ {
-         │   "type": "escalation",
-         │   "reason": "complex_query",
-         │   "summary": "客户询问团购定制价...",
-         │   "urgency": "normal"
-         │ }
+         │ 调用 session.mark_needs_human(reason)
+         │ 设置 needs_human=True, escalation_reason=reason
          ▼
   ┌──────────────┐
-  │   Router     │  拦截 escalation_signal，暂停自动回复
-  │  创建工单    │  发送占位安抚话术（"已为您转接人工，请稍候"）
-  └──────┬───────┘
-         │ 写入 EscalationTicket
-         │ 状态：open
-         ▼
-  ┌──────────────┐
-  │  通知系统    │  推送通知（WebSocket/钉钉/企微）
-  │  通知人工    │  告知有新工单待处理
+  │   Router     │  on_escalate 回调（若已注册）
+  │  触发回调    │  发送安抚话术（"已为您转接人工，请稍候"）
   └──────┬───────┘
          │
          ▼
   ┌──────────────┐
-  │ 人工工作台   │  客服打开运营后台
-  │  查看工单    │  查看客户摘要 + 会话历史
-  │  点击接管    │  状态：assigned → 人工接管态
+  │ 人工工作台   │  运营后台调用 GET /api/queue
+  │  查看收件箱  │  获取 needs_human=True 且未接管的会话列表
+  │  点击接管    │  调用 POST /api/conversations/{id}/takeover
   └──────┬───────┘
-         │
+         │ 设置 human_controlled=True
          ▼
   ┌─────────────────────────────────┐
-  │ 接管态行为                       │
-  │  • Agent 静默，不再自动回复       │
-  │  • 或：Agent 继续运行但只给建议   │
-  │    （人工客服可见 AI 建议，自己决定发不发）
-  │  • 人工客服通过工作台发送消息     │
+  │ 接管态行为（Router 已实现）      │
+  │  • Agent 静默，不再自动回复     │
+  │    → session.human_controlled 时 │
+  │      Router 只记消息，不调 handler│
+  │  • 人工客服通过后台发消息       │
+  │    → POST /api/conversations/{id}/messages
   └──────┬────────────────────────────┘
          │ 人工回复通过 adapter.send() 发送
          ▼
   ┌──────────────┐
-  │ 客服结束会话 │  点击"结束"或释放
-  │  状态 resolved│  状态变为 resolved
+  │ 客服结束会话 │  调用 POST /api/conversations/{id}/release
+  │  释放回 agent│  设置 human_controlled=False
   └──────┬───────┘
          │
          ▼
@@ -408,20 +419,21 @@
   └──────────────┘
 ```
 
-### 5.2 关键设计决策
+### 5.2 关键设计决策（现状）
 
 | 决策 | 说明 |
 |------|------|
-| **结构化 escalation 信号** | 现状是 LLM 输出纯话术（"转人工"），**规划改为** LLM 输出结构化 JSON 信号，`Router` 拦截该信号后走工单流程，而非把"转人工"当普通回复发给客户。这要求：① 给 LLM 加 `escalation` 工具/格式说明；② `LLMHandler` 解析输出，若检测到结构化信号则返回特殊对象而非纯字符串；③ `Router` 识别该对象并触发接管。 |
-| **静默 vs 建议模式** | 规划支持两种模式：① 完全静默（agent 不生成任何回复）；② 建议模式（agent 在后台继续推理，给人工客服提供回复建议，但由人工决定是否发送）。默认静默模式，建议模式作为进阶配置。 |
-| **上下文移交** | 人工接管时，自动将最近 `MAX_CONTEXT` 条消息生成摘要（可调用 LLM 生成）写入工单 `summary`，人工客服无需翻历史即可了解全貌。 |
-| **释放机制** | 人工客服可主动释放（结束工单），或超时自动释放（如 30 分钟无人工回复），释放后 agent 恢复自动回复。 |
+| **结构化 escalation 信号** | **已实现**：不是让客户看到"转人工"纯话术，而是 LLM 在回复中插入 `[[转人工]]` 控制标记（`ESCALATE_TAG`）。`LLMHandler` 解析输出，**剥离该标记**（客户不可见），并调用 `session.mark_needs_human(reason)` 设置结构化状态。`Router` 的 `on_escalate` 回调负责发送安抚话术。`prompts/persona.md` 中已追加"转人工时追加控制标记"的指令。 |
+| **静默模式** | **已实现**：`session.human_controlled = True` 时，`Router` 在 `on_message` 中只将消息记入 `Session.history`，**不调 `handler.reply()`**，agent 完全静默。人工客服通过 API 发送的消息走正常 `adapter.send()` 通道。 |
+| **释放机制** | **已实现**：人工客服通过 `POST /api/conversations/{id}/release` 主动释放；释放后 `human_controlled=False`，agent 恢复自动回复。当前未实现超时自动释放（可后续扩展）。 |
+| **建议模式** | 规划（P2）：支持 agent 在后台继续推理给人工客服提供回复建议，但由人工决定是否发送。默认当前为完全静默模式。 |
+| **上下文移交** | 规划（P2）：人工接管时自动生成最近 `MAX_CONTEXT` 条消息的摘要写入工单。当前人工客服需通过 `GET /api/conversations/{id}` 查看历史。 |
 
 ---
 
-## 6. 持久化（现状：内存 → 规划：SQLite）
+## 6. 持久化（现状：内存 + SQLite 已提供）
 
-### 6.1 现状：内存 SessionStore
+### 6.1 内存 SessionStore
 
 当前 [`core/session.py`](../../core/session.py) 使用纯内存 `dict` 保存 `Session`：
 
@@ -440,25 +452,30 @@ class SessionStore:
 - 优点：零依赖、零延迟、实现极简。
 - 缺点：进程重启后全部会话历史丢失；无法跨进程共享；无法做离线审计和数据分析。
 
-### 6.2 规划：SQLite 持久化
+### 6.2 SQLite 持久化（现状已提供）
 
-P1 阶段引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）实现持久化。
+`core/session_sqlite.py` 引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）实现持久化。
 
 #### 设计要点
 
 | 要点 | 方案 |
 |------|------|
-| **存储范围** | `MessageRecord`（全量消息）+ `Session`（元数据：最后活跃时间、当前状态、客户关联）+ `Customer`（客户画像）+ `EscalationTicket`（P2）。不存 LLM 原始响应（仅存最终发送给用户的文本）。 |
+| **存储范围** | `MessageRecord`（全量消息）+ `Session` 元数据（`human_controlled`、`needs_human`、`escalation_reason`、最后活跃时间）。不存 LLM 原始响应（仅存最终发送给用户的文本）。 |
+| **接口兼容** | `SqliteSessionStore` 保持与内存 `SessionStore` 同接口：`get(chat_id) -> Session`、`all() -> list[Session]`。Router 与 Handler 零改动。 |
+| **写穿透** | `Session` 注册 `on_message`/`on_flags` 钩子，`SqliteSessionStore` 在钩子中实时写入 `messages`/`sessions` 表，无需显式 `save()` 调用。 |
 | **MAX_CONTEXT 语义保留** | 查询时按 `ORDER BY timestamp DESC LIMIT 20` 取最近消息，再按时间正序送入 LLMHandler，与内存 `deque(maxlen=20)` 语义一致。 |
+| **去重** | `messages` 表设 `UNIQUE(chat_id, msg_id)`，重复消息自动丢弃。 |
+| **重启恢复** | 进程重启后，`SqliteSessionStore.get(chat_id)` 从 SQLite 读取最近 N 条历史重构 `Session`；同时恢复 `human_controlled`/`needs_human`/`escalation_reason` 状态，确保接管/转人工不丢失。 |
 | **BOT_SENDER_ID 消息也需持久化** | 否则进程重启后，机器人自己的回复丢失，多轮上下文断裂。 |
 | **读写分离** | 高频写入（每条消息）直接写 SQLite；读取（运营后台查询、LLM 上下文组装）走同一个库。SQLite 在单进程/低并发场景足够；若以后需高并发，可换 PostgreSQL/Redis，但当前不需要。 |
-| **表结构** | 采用第 3 节中的 `MessageRecord`、`Session`（持久化版）、`Customer` 等表。 |
-| **迁移方式** | ① P1 新增 `SQLiteSessionStore` 类，保持 `get(chat_id) -> Session` 接口不变；② `main.py` 中通过环境变量 `SESSION_STORE=memory`（默认）/ `sqlite` 切换；③ 切换后，内存版数据不做迁移（数据量小，可接受冷启动），运营后台历史数据从 SQLite 重新查询。 |
+| **迁移方式** | `main.py` 中通过环境变量 `SESSION_STORE=memory`（默认）/ `sqlite` 切换；切换后内存版数据不做迁移（数据量小，可接受冷启动），运营后台历史数据从 SQLite 重新查询。 |
 | **索引** | `chat_id` + `timestamp` 联合索引；`msg_id` 唯一索引（去重）；`sender_id` 索引（客户画像聚合）。 |
+
+源码：`core/session_sqlite.py`（[查看](../../core/session_sqlite.py)）。
 
 ### 6.3 扩展点：以后换 PostgreSQL/Redis
 
-`SessionStore` 的接口设计保持了最小契约：`get(chat_id) -> Session`、`add(msg) -> None`。以后需要横向扩展时，只需替换 `SessionStore` 实现，Router 和 Handler 均无需改动。
+`SessionStore` 的接口设计保持了最小契约：`get(chat_id) -> Session`、`all() -> list[Session]`。以后需要横向扩展时，只需替换 `SessionStore` 实现，Router 和 Handler 均无需改动。
 
 ---
 
@@ -497,7 +514,7 @@ P1 阶段引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）
 
 ## 8. 分阶段路线
 
-> 务必注意：**以下标注"现状"的部分才是已落地的代码；标注"P1/P2/P3"的均为规划，尚未实现。**
+> 务必注意：**以下标注"现状"或 ✅ 的部分才是已落地的代码；标注"📋 规划"或 📋 的均为尚未实现。**
 
 ### P0：接口 / 骨架 / 文档（现状）
 
@@ -509,25 +526,33 @@ P1 阶段引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）
 - ✅ `RagKnowledgeProvider` stub（接口预留，抛 `NotImplementedError`）。
 - ✅ `SessionStore` 内存版（`dict` + `deque(maxlen=20)`），扩展点已留。
 - ✅ 环境变量驱动配置（`.env` + `load_env_file`），无配置框架依赖。
-- ✅ 技术文档体系（`docs/技术文档/` 00~04 已交付，本文档 06 为当前新增）。
-- ✅ 离线单测（`tests/test_llm_offline.py`、`tests/test_knowledge_offline.py`）。
+- ✅ 技术文档体系（`docs/技术文档/` 00~05 已交付，本文档 06 为当前更新）。
+- ✅ 离线单测套件（全部纯离线，注入假 transport/embedder、临时 db、localhost 无需外网）：
+  - `tests/test_llm_offline.py`（5 项）
+  - `tests/test_knowledge_offline.py`（3 项）
+  - `tests/test_rag_offline.py`（8 项）
+  - `tests/test_takeover_offline.py`（5 项）
+  - `tests/test_sqlite_offline.py`（5 项）
+  - `tests/test_api_offline.py`（10 项）
+  - `tests/test_integration_offline.py`（1 个端到端流程，串 T1+T2+T3）
 
 ### P1：持久化 + API + 结构化商品库 + FAQ RAG（样例）
 
-- 📋 **SQLite 持久化**：`SQLiteSessionStore` 替换内存版，保留 `MAX_CONTEXT` 语义；`MessageRecord`、`Customer` 表落地；`main.py` 通过环境变量切换 `memory` / `sqlite`。
-- 📋 **REST API 层**：引入轻量 HTTP 服务（如标准库 `http.server` 线程模型或 `aiohttp` 作为可选依赖），提供第 4 节中的会话管理、知识管理、人设配置、Agent 预览端点。前端按此契约对接。
+- ✅ **SQLite 持久化**：`SqliteSessionStore` 已落地，保留 `MAX_CONTEXT` 语义；`MessageRecord` 表落地；`main.py` 通过环境变量 `SESSION_STORE=memory` / `sqlite` 切换。
+- ✅ **REST API 层**：`ApiApp` + `stdlib http.server` 薄壳已落地，提供会话管理、人工接管、Agent 预览、配置查看、指标基础端点。前端按此契约对接。
+- ✅ **人工接管后端**：结构化 escalation 信号（`[[转人工]]`）+ `mark_needs_human` + `on_escalate` 回调 + `human_controlled` 静默 + API `takeover`/`release` 已落地。
 - 📋 **结构化商品库**：`Product` 表 + 管理端点，支持关键词/属性精确查询，用于"这个怎么卖"等精确回答场景。
 - 📋 **FAQ RAG 样例**：实现 `RagKnowledgeProvider`（可选依赖：复用 StepFun/OpenAI 兼容接口做 embedding；小规模向量存 SQLite 或 JSON，大规模用向量库），提供至少 20 条 FAQ 的索引和检索演示。
 - 📋 **知识混合策略**：`LLMHandler._compose_system` 保持"persona + 知识模块"结构，知识模块内部可组合：精确商品查询（结构化库）+ 语义 FAQ 检索（RAG）+ 兜底全量知识（Static）。
 
-### P2：人工接管工作台后端 + 指标
+### P2：指标 + 配置中心 + 知识管理后台
 
-- 📋 **结构化 escalation 信号**：改造 `LLMHandler` 和 `Router`，使 agent 输出 JSON 结构化信号而非纯话术，触发接管流程。
-- 📋 **接管工单系统**：`EscalationTicket` 表 + 人工接管端点（`takeover` / `reply` / `release`），工作台状态管理。
-- 📋 **人工回复通道**：运营后台通过 API 发送的消息，走 `adapter.send()` 发给客户，与 agent 自动回复共享同一发送通道。
-- 📋 **指标埋点**：`MetricEvent` 表 + 实时看板端点（`/api/v1/metrics/dashboard`），覆盖回复量、触发率、LLM 错误率、降级次数、人工接管率等。
+- 📋 **指标埋点**：`MetricEvent` 表 + 实时看板端点（`/api/metrics/dashboard`），覆盖回复量、触发率、LLM 错误率、降级次数、人工接管率等。
 - 📋 **配置中心**：动态调参（如 `rate_limit_sec`、`persona_md`），无需重启进程，运营后台即时生效。
 - 📋 **知识管理后台**：FAQ 增删改查、知识文件上传、RAG 索引重建。
+- 📋 **独立工单系统**：`EscalationTicket` 表 + 多客服分配 + SLA 统计 + 超时自动释放。
+- 📋 **建议模式**：人工接管时 agent 后台推理提供回复建议，由人工决定是否发送。
+- 📋 **上下文移交摘要**：接管时自动生成最近对话摘要写入工单。
 
 ### P3：接真实店铺数据 + 真实传输
 
@@ -537,6 +562,7 @@ P1 阶段引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）
   - 或：优先接入**微信客服适配器**（合规稳定），将群聊流量引导至 1:1 客服通道。
 - 📋 **生产加固**：日志轮转、进程守护（supervisor/systemd）、配置加密（`ADMIN_TOKEN` / `LLM_API_KEY`）、错误告警（企微/钉钉 webhook）。
 - 📋 **持续迭代**：根据真实运营数据，优化触发策略、prompt 模板、知识库覆盖、FAQ 命中率和人工接管阈值。
+- 📋 **CI**：自动化测试、lint、镜像构建流水线。
 
 ---
 
@@ -549,5 +575,9 @@ P1 阶段引入 `sqlite3`（Python 标准库自带，仍保持零额外依赖）
 | 了解传输与部署 | [适配器与部署](04-适配器与部署.md) | — |
 | 本地验证全链路（Mac） | [后端](03-后端.md) | `MOCK=1 HANDLER=llm python3 main.py` |
 | 离线 LLM 单测 | [测试文档](../测试文档/01-离线单测.md) | `python3 tests/test_llm_offline.py` |
-| 知识模块设计 | `docs/技术文档/05-知识模块设计.md`（如已交付） | `python3 tests/test_knowledge_offline.py` |
+| 知识模块设计 | [知识模块设计](05-知识模块设计.md) | `python3 tests/test_knowledge_offline.py` |
 | 了解本系统架构与 API | 本文档 | — |
+| 运行 REST API（本地） | 本文档 | `ADMIN_TOKEN=dev python3 api_server.py`（或 `python3 tests/test_api_offline.py`） |
+| 运行人工接管离线测试 | 本文档 | `python3 tests/test_takeover_offline.py` |
+| 运行 SQLite 离线测试 | 本文档 | `python3 tests/test_sqlite_offline.py` |
+| 运行端到端集成测试 | 本文档 | `python3 tests/test_integration_offline.py` |
