@@ -24,7 +24,7 @@ python3 tests/test_rag_offline.py
 |----|------|-------|--------|--------------------|
 | T1 | 结构化转人工信号 + 人工接管状态（接管时 agent 静默） | CONV-A | done | `core/router.py` `core/session.py` `core/llm_handler.py` `prompts/persona.md` `tests/test_takeover_offline.py` |
 | T2 | SQLite 持久化会话/消息（SqliteSessionStore，与内存版同接口） | CONV-A | done | `core/session_sqlite.py`(新) `core/session.py`(写穿透钩子) `tests/test_sqlite_offline.py` |
-| T3 | REST API 层（会话/预览/接管/配置，stdlib http.server，独立入口） | CONV-A | doing | `api_server.py`(新) `tests/test_api_offline.py` |
+| T3 | REST API 层（会话/预览/接管/配置，stdlib http.server，独立入口） | CONV-A | done | `api_server.py`(新) `tests/test_api_offline.py` |
 | T4 | 微信客服适配器（官方合规 1:1；回调验签+AES、sync_msg 拉取、send_msg） | CONV-B | doing | `adapters/wecom_kf.py`(新) `adapters/wecom_crypto.py`(新) `tests/test_kf_offline.py`；`main.py` 仅加 `ADAPTER=kf` 分支（改前 pull） |
 | T5 | GitHub Actions CI（push 跑 tests）+ LICENSE | CONV-B | doing | `.github/workflows/ci.yml`(新) `LICENSE`(新) |
 | T6 | 结构化商品库 StructuredKnowledgeProvider（精确查价/规格） | CONV-B | doing | `core/knowledge.py`(新增类；CONV-A 不动此文件) `tests/test_structured_kb_offline.py` |
