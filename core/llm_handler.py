@@ -13,10 +13,11 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .handler import Handler
+from .knowledge import KnowledgeProvider, StaticKnowledgeProvider
 from .message import BOT_SENDER_ID, Message
 from .session import Session
 
-# 项目根目录（core/ 的上一级），用于解析 persona/knowledge 相对路径
+# 项目根目录（core/ 的上一级），用于解析 persona 相对路径
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
@@ -28,11 +29,14 @@ class LLMHandler(Handler):
     - LLM_BASE_URL     API base URL（默认 https://api.deepseek.com）
     - LLM_MODEL        模型 ID（默认 deepseek-v4-flash；老名字 deepseek-chat/
                        deepseek-reasoner 于 2026-07-24 停用）
-    - LLM_SYSTEM_PROMPT 系统提示词（若设置则直接用它覆盖，否则由 persona+knowledge 文件组装）
+    - LLM_SYSTEM_PROMPT 完整覆盖系统提示词（若设置则忽略 persona/knowledge，直接用它）
     - LLM_PERSONA_FILE   人设文件路径（默认 prompts/persona.md）
-    - LLM_KNOWLEDGE_FILE 店铺知识文件路径（默认 prompts/knowledge.md）
+    - LLM_KNOWLEDGE_FILE 店铺知识文件路径（默认 prompts/knowledge.md；由知识模块读取）
     - LLM_TIMEOUT      请求超时秒数（默认 60）
     - LLM_MAX_HISTORY  进入上下文的最近历史消息条数（默认 10）
+
+    知识通过可插拔的 KnowledgeProvider 获取（见 core/knowledge.py）：默认
+    StaticKnowledgeProvider（全量塞），以后可无缝换 RagKnowledgeProvider（按 query 检索）。
     """
 
     _DEFAULT_SYSTEM = (
@@ -43,29 +47,34 @@ class LLMHandler(Handler):
 
     _MAX_CONTENT_CHARS = 2000  # 单条消息进入上下文的长度上限，防上下文膨胀/滥用
 
-    def __init__(self, *, transport: Callable[[list[dict]], str] | None = None) -> None:
+    def __init__(self, *, transport: Callable[[list[dict]], str] | None = None,
+                 knowledge: KnowledgeProvider | None = None) -> None:
         self._api_key = os.environ.get("LLM_API_KEY", "")
         self._base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com").rstrip("/")
         self._model = os.environ.get("LLM_MODEL", "deepseek-v4-flash")
-        self._system_prompt = self._load_system_prompt()
+        self._override = os.environ.get("LLM_SYSTEM_PROMPT", "")
+        self._persona = self._read_file(os.environ.get("LLM_PERSONA_FILE", "prompts/persona.md"))
+        self._knowledge = knowledge or StaticKnowledgeProvider(
+            os.environ.get("LLM_KNOWLEDGE_FILE", "prompts/knowledge.md"))
         self._timeout = float(os.environ.get("LLM_TIMEOUT", "60"))
         self._max_history = int(os.environ.get("LLM_MAX_HISTORY", "10"))
         self._transport = transport
         self._fallback = "不好意思，我这边有点忙，稍后回复你哈~"
 
-    def _load_system_prompt(self) -> str:
-        """组装 system prompt：LLM_SYSTEM_PROMPT 覆盖 > persona+knowledge 文件 > 内置默认。"""
-        override = os.environ.get("LLM_SYSTEM_PROMPT")
-        if override:
-            return override
-        persona = self._read_file(os.environ.get("LLM_PERSONA_FILE", "prompts/persona.md"))
-        knowledge = self._read_file(os.environ.get("LLM_KNOWLEDGE_FILE", "prompts/knowledge.md"))
-        if persona:
-            parts = [persona.strip()]
-            if knowledge:
-                parts.append("# 店铺知识（回答一律以此为准）\n\n" + knowledge.strip())
-            return "\n\n".join(parts)
-        return self._DEFAULT_SYSTEM
+    def _compose_system(self, query: str) -> str:
+        """组装 system prompt：LLM_SYSTEM_PROMPT 覆盖 > persona + 知识模块检索结果 > 内置默认。
+
+        知识按 query 从 KnowledgeProvider 取（静态实现返回全量、检索实现返回相关片段），
+        所以每条消息现取现拼——这样以后换 RAG 无需改这里。
+        """
+        if self._override:
+            return self._override
+        base = self._persona.strip() if self._persona else self._DEFAULT_SYSTEM
+        parts = [base]
+        knowledge = self._knowledge.retrieve(query).strip()
+        if knowledge:
+            parts.append("# 店铺知识（回答一律以此为准）\n\n" + knowledge)
+        return "\n\n".join(parts)
 
     @staticmethod
     def _read_file(path: str) -> str:
@@ -78,7 +87,8 @@ class LLMHandler(Handler):
             return ""
 
     def reply(self, msg: Message, session: Session) -> str | None:
-        messages = self._build_messages(session)
+        system = self._compose_system(msg.content)
+        messages = self._build_messages(system, session)
 
         # transport 注入优先（离线测试/自定义后端），短路掉真实网络与 key 校验
         if self._transport is not None:
@@ -91,7 +101,7 @@ class LLMHandler(Handler):
 
         return self._call_api(messages)
 
-    def _build_messages(self, session: Session) -> list[dict]:
+    def _build_messages(self, system: str, session: Session) -> list[dict]:
         """组装 system + 最近 N 条历史。
 
         以 session.history 为唯一上下文来源——Router 在调用 reply 前已把当前消息
@@ -99,7 +109,7 @@ class LLMHandler(Handler):
         群里多人发言：机器人自己的消息映射为 assistant，其它成员映射为 user 并加
         「昵称：」前缀，让模型分得清是谁说的。
         """
-        messages: list[dict] = [{"role": "system", "content": self._system_prompt}]
+        messages: list[dict] = [{"role": "system", "content": system}]
         for m in list(session.history)[-self._max_history:]:
             content = (m.content or "").strip()
             if not content:
