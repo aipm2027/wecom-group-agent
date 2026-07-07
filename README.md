@@ -72,5 +72,6 @@ python3 examples/demo_agent.py
 
 - ✅ 传输无关架构 + mock 全链路在 Mac 跑通（触发/去重/限流/多轮）
 - ✅ LLMHandler 接 StepFun，人设+知识文件化，9 场景评测
+- ✅ 知识做成可插拔模块：StaticKnowledgeProvider + 优化版 RagKnowledgeProvider（混合检索/小库直通/never-worse 兜底，纯 stdlib）
 - ⏳ 真实企微群 hook（`ntwork`）——待 Windows 环境
 - ⏳ 微信客服适配器（合规 1:1）——待接入

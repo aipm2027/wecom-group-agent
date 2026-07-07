@@ -17,13 +17,10 @@ def test_static_returns_file_content() -> None:
     assert a and a == b, "静态实现应忽略 query、每次返回同样的全量内容"
 
 
-def test_rag_is_stub() -> None:
-    """RAG 实现当前是 stub，应明确抛未实现。"""
-    try:
-        RagKnowledgeProvider().retrieve("x")
-        raise AssertionError("RagKnowledgeProvider 应抛 NotImplementedError")
-    except NotImplementedError:
-        pass
+def test_rag_provider_exists() -> None:
+    """RagKnowledgeProvider 已实现，可正常实例化，不再抛 NotImplementedError。"""
+    kp = RagKnowledgeProvider()
+    assert kp is not None
 
 
 def test_provider_is_pluggable() -> None:
@@ -39,7 +36,7 @@ def test_provider_is_pluggable() -> None:
 
 
 def main() -> None:
-    for fn in (test_static_returns_file_content, test_rag_is_stub, test_provider_is_pluggable):
+    for fn in (test_static_returns_file_content, test_rag_provider_exists, test_provider_is_pluggable):
         fn()
         print(f"通过: {fn.__name__}")
     print("\n知识模块测试全部通过！")
