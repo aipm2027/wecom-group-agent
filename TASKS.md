@@ -25,13 +25,19 @@ python3 tests/test_rag_offline.py
 | T1 | 结构化转人工信号 + 人工接管状态（接管时 agent 静默） | CONV-A | done | `core/router.py` `core/session.py` `core/llm_handler.py` `prompts/persona.md` `tests/test_takeover_offline.py` |
 | T2 | SQLite 持久化会话/消息（SqliteSessionStore，与内存版同接口） | CONV-A | done | `core/session_sqlite.py`(新) `core/session.py`(写穿透钩子) `tests/test_sqlite_offline.py` |
 | T3 | REST API 层（会话/预览/接管/配置，stdlib http.server，独立入口） | CONV-A | done | `api_server.py`(新) `tests/test_api_offline.py` |
-| T4 | 微信客服适配器（官方合规 1:1；回调验签+AES、sync_msg 拉取、send_msg） | CONV-B | doing | `adapters/wecom_kf.py`(新) `adapters/wecom_crypto.py`(新) `tests/test_kf_offline.py`；`main.py` 仅加 `ADAPTER=kf` 分支（改前 pull） |
-| T5 | GitHub Actions CI（push 跑 tests）+ LICENSE | CONV-B | doing | `.github/workflows/ci.yml`(新) `LICENSE`(新) |
-| T6 | 结构化商品库 StructuredKnowledgeProvider（精确查价/规格） | CONV-B | doing | `core/knowledge.py`(新增类；CONV-A 不动此文件) `tests/test_structured_kb_offline.py` |
+| T4 | 微信客服适配器（官方合规 1:1；回调验签+AES、sync_msg 拉取、send_msg） | CONV-B | done | `adapters/wecom_kf.py`(新) `adapters/wecom_crypto.py`(新) `tests/test_kf_offline.py`；`main.py` 仅加 `ADAPTER=kf` 分支（改前 pull） |
+| T5 | GitHub Actions CI（push 跑 tests）+ LICENSE | CONV-B | done | `.github/workflows/ci.yml`(新) `LICENSE`(新) |
+| T6 | 结构化商品库 StructuredKnowledgeProvider（精确查价/规格） | CONV-B | done | `core/knowledge.py`(新增类；CONV-A 不动此文件) `tests/test_structured_kb_offline.py` |
 
 > CONV-A（当前主对话）承接 **T1→T2→T3**（核心后端，集中改 core/，避免多人冲突）。
 > 第二个对话请从 **T4 / T5 / T6** 认领——这三块与 T1-T3 文件基本不重叠。
 > 参考：T4 见 `docs/技术文档/04-适配器与部署.md`；T6 见 `docs/技术文档/05-知识模块设计.md`；API 契约见 `docs/技术文档/06-系统架构与API.md`。
+
+> **CONV-B 交接（T4/T5/T6 已 done 并推送）**
+> - `main.py` 新增 `build_knowledge()`：`KNOWLEDGE_PROVIDER=static|rag|structured|hybrid` 选知识后端（走 `LLMHandler(knowledge=...)` 注入点，**未改** `core/llm_handler.py`）；并加 `ADAPTER=kf` 分支。RAG/结构化的“接线”已完成（最初需求）。
+> - T4 加解密纯 Python 自实现 AES-256（FIPS-197 向量钉住正确性），零第三方依赖；`ADAPTER=kf` 未配 `WECOM_ENCODING_AES_KEY` 会在启动按配置报错（预期）。真机与腾讯互通待公网回调联调。
+> - 本机全量 `tests/test_*.py`（9 个）全绿；CI 就绪（3.9–3.12）。
+> - 留给 owner（未动免抢文件）：`.env.example` 可补 `KNOWLEDGE_PROVIDER` 与 `LLM_EMBED_URL`/`LLM_EMBED_MODEL` 说明。
 
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
