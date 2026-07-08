@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import sys
 
 from core.router import Router
 from core.session import SessionStore
@@ -45,6 +46,27 @@ def build_knowledge():
     return None  # static / 未知 → 用 LLMHandler 默认的 StaticKnowledgeProvider
 
 
+def build_sessions():
+    """按 STORE 选会话存储：memory（默认，内存版）| sqlite（持久化，重启不丢）。
+
+    与 api_server.py 的 build_app 保持一致：两进程设同一个 SQLITE_PATH 即可共享会话，
+    否则主进程（本文件）与运营后台 API 各自读写不同存储，状态会不一致。
+    """
+    if os.environ.get("STORE") == "sqlite":
+        from core.session_sqlite import SqliteSessionStore
+        return SqliteSessionStore(os.environ.get("SQLITE_PATH", "data/sessions.db"))
+    return SessionStore()
+
+
+def _default_on_escalate(session) -> None:
+    """默认升级回调：转人工时打印到 stderr，让主入口也能看到升级信号。
+
+    生产可替换为写工单队列 / 调 webhook 通知工作台（见 docs 06 人工接管章节）。
+    """
+    reason = getattr(session, "escalation_reason", "") or getattr(session, "needs_human", "")
+    print(f"[escalate] 会话 {session.chat_id} 需人工介入：{reason}", file=sys.stderr)
+
+
 def build_handler():
     handler_type = os.environ.get("HANDLER", "echo")
     if handler_type == "llm":
@@ -71,7 +93,7 @@ def load_env_file(path: str = ".env") -> None:
 def main() -> None:
     load_env_file()
     adapter = build_adapter()
-    router = Router(adapter, build_handler(), SessionStore())
+    router = Router(adapter, build_handler(), build_sessions(), on_escalate=_default_on_escalate)
     adapter.start(router.on_message)
 
 
