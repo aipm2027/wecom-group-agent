@@ -287,6 +287,47 @@ def test_adapter_error_handling() -> None:
         assert False, "_handle_post 不应抛出异常"
 
 
+def test_sync_msg_errcode() -> None:
+    """sync_msg 返回 errcode != 0 时，不把错误响应当消息，返回空列表（不静默误判/丢消息）。"""
+    def ok_get(url: str) -> dict:
+        return {"access_token": "fake_token", "expires_in": 7200}
+
+    def err_post(url: str, payload: dict) -> dict:
+        if "sync_msg" in url:
+            return {"errcode": 40001, "errmsg": "invalid credential"}
+        return {"errcode": 0}
+
+    adapter = WecomKfAdapter(
+        corp_id=_RECEIVEID, kf_secret="fake_secret", callback_token=_TOKEN,
+        encoding_aes_key=_ENCODING_AES_KEY, http_get_json=ok_get, http_post_json=err_post,
+    )
+    assert adapter._sync_msg("token001", "") == [], "errcode 非 0 时应返回空列表而非把错误响应当消息"
+
+
+def test_missing_aes_key_friendly_error() -> None:
+    """未配置 EncodingAESKey 时构造适配器应抛带字段名的 RuntimeError（而非晦涩的 crypto 报错）。"""
+    try:
+        WecomKfAdapter(corp_id="c", kf_secret="s", callback_token="t", encoding_aes_key="")
+        assert False, "应抛 RuntimeError"
+    except RuntimeError as exc:
+        assert "WECOM_ENCODING_AES_KEY" in str(exc), "错误信息应提示缺少的环境变量名"
+
+
+def test_decrypt_bad_length() -> None:
+    """密文长度非法（非 16 倍数）但签名正确时，应抛受控的 WeComCryptError 而非 IndexError。"""
+    import hashlib
+    crypt = WXBizMsgCrypt(_TOKEN, _ENCODING_AES_KEY, _RECEIVEID)
+    bad_encrypt = base64.b64encode(b"hello").decode("utf-8")  # 5 字节，非 16 倍数
+    ts, nonce = "123", "n"
+    sig = hashlib.sha1("".join(sorted([_TOKEN, ts, nonce, bad_encrypt])).encode("utf-8")).hexdigest()
+    post_xml = f"<xml><Encrypt><![CDATA[{bad_encrypt}]]></Encrypt></xml>"
+    try:
+        crypt.decrypt_msg(sig, ts, nonce, post_xml)
+        assert False, "应抛 WeComCryptError"
+    except WeComCryptError:
+        pass
+
+
 def main() -> None:
     for fn in (
         test_encoding_aes_key_valid,
@@ -298,6 +339,9 @@ def main() -> None:
         test_adapter_post,
         test_adapter_send,
         test_adapter_error_handling,
+        test_sync_msg_errcode,
+        test_missing_aes_key_friendly_error,
+        test_decrypt_bad_length,
     ):
         fn()
         print(f"通过: {fn.__name__}")

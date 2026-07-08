@@ -50,6 +50,11 @@ class WecomKfAdapter(Adapter):
         self.callback_path = callback_path if callback_path is not None else os.environ.get("WECOM_CALLBACK_PATH", "/wecom/callback")
         self._http_get_json = http_get_json or self._default_http_get_json
         self._http_post_json = http_post_json or self._default_http_post_json
+        if not self.encoding_aes_key:
+            raise RuntimeError(
+                "WecomKfAdapter 缺少 WECOM_ENCODING_AES_KEY（企业微信 43 位 EncodingAESKey）；"
+                "请在 .env 配置后再用 ADAPTER=kf 启动。"
+            )
         self._crypt = WXBizMsgCrypt(self.callback_token, self.encoding_aes_key, self.corp_id)
         self._access_token = ""
         self._token_expires = 0.0
@@ -117,11 +122,26 @@ class WecomKfAdapter(Adapter):
             if not access_token:
                 return []
             url = f"https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token={access_token}"
-            payload = {"token": token, "cursor": cursor, "limit": 1000}
-            data = self._http_post_json(url, payload)
-            if "next_cursor" in data:
-                self._cursor = data["next_cursor"]
-            return data.get("msg_list", [])
+            all_msgs: list[dict] = []
+            # 分页拉取：has_more=1 时用 next_cursor 继续；最多 20 页兜底防死循环
+            for _ in range(20):
+                payload = {"token": token, "cursor": cursor, "limit": 1000}
+                data = self._http_post_json(url, payload)
+                errcode = data.get("errcode", 0)
+                if errcode:
+                    # errcode/errmsg 非密钥，可安全记录（便于定位 token 失效/频率限制等），
+                    # 出错时不把错误响应当成“无消息”，避免静默丢消息
+                    print(f"[WecomKfAdapter] sync_msg 返回错误 errcode={errcode} "
+                          f"errmsg={data.get('errmsg', '')}", file=sys.stderr)
+                    break
+                all_msgs.extend(data.get("msg_list", []))
+                next_cursor = data.get("next_cursor", "")
+                if next_cursor:
+                    cursor = next_cursor
+                    self._cursor = next_cursor
+                if not data.get("has_more"):
+                    break
+            return all_msgs
         except Exception as exc:
             print(f"[WecomKfAdapter] sync_msg 失败: {exc.__class__.__name__}", file=sys.stderr)
             return []

@@ -305,6 +305,8 @@ class WXBizMsgCrypt:
         return _aes_cbc_encrypt(self.aes_key, self.iv, padded)
 
     def _decrypt(self, cipher_bytes: bytes) -> bytes:
+        if not cipher_bytes or len(cipher_bytes) % 16 != 0:
+            raise WeComCryptError("密文长度非法（空或非 16 字节整数倍）")
         decrypted = _aes_cbc_decrypt(self.aes_key, self.iv, cipher_bytes)
         unpadded = _pkcs7_unpad(decrypted, 32)
         return _unpack(unpadded, self.receiveid.encode("utf-8"))
