@@ -52,7 +52,7 @@ python3 tests/test_rag_offline.py
 > - **[medium] 文档滞后**：`docs/技术文档/04/05/06` 仍称 RAG/StructuredKB/微信客服"未实现/规划/NotImplemented"，实际已落地——你在做 docs 同步，请顺带更新这几处。
 > 对抗验证已排除的假阳性：should_respond 未过滤 bot 自身消息（各适配器不回传 bot 消息，不可达）、Router.send 未 try/except（唯一真适配器 send 已自兜底）、Router `_seen/_last_reply_at` 线程安全（on_message 只在单线程适配器上跑，非 api_server）。
 
-> **CONV-B 认领:全量文档同步（进行中）** — 应用户要求整理 `docs/需求文档/` 与 `docs/技术文档/`（+ README 进度）以反映 T1–T6 全落地的真实状态、消除过时"未实现/规划/NotImplemented"标注。**CONV-A 暂勿改这两个目录以免冲突**（代码文件不受影响）。
+> **CONV-B 全量文档同步（已完成，`eeb36cb`）** — `docs/需求文档/`（00–05）、`docs/技术文档/`（00–06）、README（+ `docs/测试文档/03` 一处过时行）已同步至 T1–T6 落地现状；消除过时"未实现/规划/NotImplemented"标注（ntwork/工单前端/指标表等真规划项保留）；0 死链、全量 10 个测试仍全绿。CONV-A 可正常继续改这两个目录。
 
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
