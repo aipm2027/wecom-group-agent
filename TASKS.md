@@ -41,14 +41,15 @@ python3 tests/test_rag_offline.py
 
 > **CONV-B 全局审查（2026-07-08，59 条发现经对抗验证去伪）**
 > 已修并推送（CONV-B 文件，`1c68ee0`）：wecom_kf `_sync_msg` 校验 errcode + 分页拉取、缺 `WECOM_ENCODING_AES_KEY` 友好报错、wecom_crypto 密文长度校验统一抛 `WeComCryptError`、knowledge RAG embedding 捕获 `socket.timeout`、`main.py` 加 `STORE=sqlite` 开关 + 默认 `on_escalate` 日志。
-> **待 CONV-A 处理（其文件，我未改）**——多为 `api_server.py` 用 `ThreadingHTTPServer` 才触发的并发问题：
-> - **[high] `api_server.py build_app()` 硬编码 `adapter=None`** → 运营后台"人工发消息"永远 `sent=False`、触达不了用户。建议复用 `main.py` 的 `build_adapter()`。
-> - **[high] `api_server.py _preview_seq += 1` 非原子** → 多线程重复 msg_id，配 SQLite `INSERT OR IGNORE` 会静默丢消息。建议 `threading.Lock`/`itertools.count`。
-> - **[high] `SessionStore.get`/`SqliteSessionStore.get`(_live) 无锁 check-then-act** → 并发下同一 chat_id 产生多个 Session、历史分叉（已复现）。建议加锁（SqliteSessionStore 的 lock 改 `RLock` 并覆盖 `_live` 读写与 `all()`）。
-> - **[high] `SqliteSessionStore._persist_message/_persist_flags` 无 try/except** → DB 满/锁定时异常穿透 `Router.on_message` 中断处理。建议 `except sqlite3.Error` 记日志后继续。
-> - **[medium] `api_server` 无请求体大小上限**（超大 Content-Length 耗内存；默认仅绑 127.0.0.1，风险有限）；**对不存在 chat_id 自动建空会话不返回 404**；**`llm_handler` 的 `except (URLError, TimeoutError)` 未含 `socket.timeout`**（同 knowledge.py 已修点）。
-> - **[low] `ADMIN_TOKEN` 用 `==` 比较**（时序攻击，本地服务风险低）→ 建议 `hmac.compare_digest`。
-> - **[medium] 文档滞后**：`docs/技术文档/04/05/06` 仍称 RAG/StructuredKB/微信客服"未实现/规划/NotImplemented"，实际已落地——建议同步这几处状态。
+> **已由 CONV-B 代修并推送（`29c8e1b`，经用户授权跨界，全量 10 个测试全绿）**——原属 CONV-A 文件：
+> - **[high] `api_server.py build_app()` adapter=None** → 已改为复用 `build_adapter()`，人工发消息现能经 adapter 下发（`sent=True`）。
+> - **[high] `api_server._preview_seq` 非原子** → 改用 `itertools.count`（原子），msg_id 不再重复。
+> - **[high] `SessionStore`/`SqliteSessionStore` 并发 get 竞态** → `SessionStore` 加 `Lock`；`SqliteSessionStore` 改 `RLock` 并锁住 `get/all` 的 `_live` 读写。新增 `tests/test_concurrency_offline.py` 回归。
+> - **[high] `SqliteSessionStore._persist_*` 无兜底** → 包 `except sqlite3.Error` 记日志不上抛。
+> - **[medium] `api_server` 请求体上限** → >1MB 返回 413；**`llm_handler` 网络降级** → 已含 `socket.timeout`；**[low] `ADMIN_TOKEN`** → 改 `hmac.compare_digest`。
+> **仍留给 CONV-A（我按产品语义未擅改）**：
+> - **[medium] 对不存在 chat_id 自动建空会话、不返回 404**——需给 store 加 `exists()` 且现有 `test_api_offline` 依赖自动建，改动会动到你的测试，请你定产品行为。
+> - **[medium] 文档滞后**：`docs/技术文档/04/05/06` 仍称 RAG/StructuredKB/微信客服"未实现/规划/NotImplemented"，实际已落地——你在做 docs 同步，请顺带更新这几处。
 > 对抗验证已排除的假阳性：should_respond 未过滤 bot 自身消息（各适配器不回传 bot 消息，不可达）、Router.send 未 try/except（唯一真适配器 send 已自兜底）、Router `_seen/_last_reply_at` 线程安全（on_message 只在单线程适配器上跑，非 api_server）。
 
 ## 约束（全项目通用）
