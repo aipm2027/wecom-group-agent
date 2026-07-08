@@ -18,6 +18,8 @@
 """
 from __future__ import annotations
 
+import hmac
+import itertools
 import json
 import os
 import sys
@@ -30,6 +32,7 @@ from core.message import Message
 from core.session import Session
 
 HUMAN_SENDER_ID = "human-agent"
+_MAX_BODY = 1024 * 1024  # 请求体上限 1MB，超出返回 413（防超大 Content-Length 耗内存）
 
 
 class ApiApp:
@@ -40,7 +43,7 @@ class ApiApp:
         self.handler = handler
         self.adapter = adapter
         self.admin_token = admin_token
-        self._preview_seq = 0
+        self._seq = itertools.count(1)  # 线程安全自增（CPython 下 next(count) 原子），避免 msg_id 重复
 
     # --- 鉴权 ---
     def _authed(self, headers: dict) -> bool:
@@ -48,10 +51,10 @@ class ApiApp:
             return True  # 未配置 token = 开发模式放行（启动时已告警）
         auth = headers.get("authorization") or headers.get("Authorization") or ""
         if auth.startswith("Bearer "):
-            if auth[7:].strip() == self.admin_token:
+            if hmac.compare_digest(auth[7:].strip(), self.admin_token):
                 return True
         token = headers.get("x-admin-token") or headers.get("X-Admin-Token") or ""
-        return token == self.admin_token
+        return hmac.compare_digest(token, self.admin_token)
 
     # --- 主入口：返回 (status, dict) ---
     def handle(self, method: str, path: str, body: bytes, headers: dict) -> tuple[int, dict]:
@@ -100,10 +103,10 @@ class ApiApp:
         if not text:
             raise ValueError("text 不能为空")
         session = self.sessions.get(chat_id)
-        self._preview_seq += 1
+        seq = next(self._seq)
         session.add(Message(
             chat_id=chat_id, chat_type=session.history[-1].chat_type if session.history else "single",
-            msg_id=f"human-{chat_id}-{self._preview_seq}", sender_id=HUMAN_SENDER_ID,
+            msg_id=f"human-{chat_id}-{seq}", sender_id=HUMAN_SENDER_ID,
             sender_name=(data.get("sender_name") or "人工客服"), content=text, msg_type="text"))
         sent = False
         if self.adapter is not None:
@@ -120,9 +123,9 @@ class ApiApp:
             raise ValueError("text 不能为空")
         # 用一次性会话，不持久化、不影响真实会话
         session = Session(chat_id=data.get("chat_id") or "__preview__")
-        self._preview_seq += 1
+        seq = next(self._seq)
         msg = Message(chat_id=session.chat_id, chat_type="single",
-                      msg_id=f"preview-{self._preview_seq}", sender_id="preview",
+                      msg_id=f"preview-{seq}", sender_id="preview",
                       sender_name=(data.get("sender_name") or "客户"), content=text)
         session.add(msg)
         reply = self.handler.reply(msg, session)
@@ -185,6 +188,14 @@ def _make_handler(app: ApiApp):
     class Handler(BaseHTTPRequestHandler):
         def _run(self, method: str) -> None:
             length = int(self.headers.get("Content-Length", 0) or 0)
+            if length > _MAX_BODY:
+                data = b'{"error":"payload too large"}'
+                self.send_response(413)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+                return
             body = self.rfile.read(length) if length else b""
             headers = {k.lower(): v for k, v in self.headers.items()}
             status, payload = app.handle(method, self.path, body, headers)
@@ -219,7 +230,14 @@ def build_app() -> ApiApp:
     token = os.environ.get("ADMIN_TOKEN", "")
     if not token:
         print("[api] 警告：未设置 ADMIN_TOKEN，鉴权已放行（仅限本地开发）", file=sys.stderr)
-    return ApiApp(sessions, build_handler(), adapter=None, admin_token=token)
+    # 按环境变量装配适配器，使"人工发消息"能经 adapter 真正下发（原先硬编码 None → sent 恒 False）
+    try:
+        from main import build_adapter
+        adapter = build_adapter()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[api] 适配器构造失败（{exc.__class__.__name__}），人工发消息将无法下发", file=sys.stderr)
+        adapter = None
+    return ApiApp(sessions, build_handler(), adapter=adapter, admin_token=token)
 
 
 def main() -> None:
