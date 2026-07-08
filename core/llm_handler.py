@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -160,7 +161,7 @@ class LLMHandler(Handler):
                 pass
             print(f"[LLMHandler] HTTP {exc.code} 请求失败，已降级: {detail}", file=sys.stderr)
             return self._fallback
-        except (URLError, TimeoutError) as exc:
+        except (URLError, TimeoutError, socket.timeout) as exc:
             print(f"[LLMHandler] 网络错误，已降级: {exc.__class__.__name__}", file=sys.stderr)
             return self._fallback
         except Exception:  # noqa: BLE001
