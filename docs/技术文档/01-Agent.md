@@ -52,67 +52,62 @@ return EchoHandler()
 
 ```
 reply(msg, session)
-  ├── _build_messages(session)      # 组装 system + 最近历史
-  ├── transport 注入？               # 是 → 直接走假 transport（短路）
-  ├── 有 API key？                  # 否 → 兜底话术
-  └── _call_api(messages)           # 纯 urllib 调 OpenAI 兼容接口
-        ├── 构造 Request (urlopen)
-        ├── HTTPError / URLError / TimeoutError / 未知异常 → 兜底
-        ├── JSON 解析失败 → 兜底
-        ├── 响应结构异常 / 空内容 → 兜底
-        └── 返回模型文本
+  ├── _compose_system(msg.content)      # 覆盖 > persona + 知识模块 retrieve(query) > 默认
+  ├── _build_messages(system, session)  # system + 最近历史（角色映射）
+  ├── transport 注入？                   # 是 → 走假 transport（短路网络与 key 校验）
+  ├── 无 API key？                       # 是 → 兜底话术
+  ├── _call_api(messages)               # 纯 urllib 调 OpenAI 兼容接口（异常全降级）
+  └── _postprocess(text, session)       # 剥离 [[转人工]] 标记 + 标记 needs_human
 ```
 
-关键代码片段（`reply` 方法）：
+关键代码片段（`reply` 方法，节选自源码）：
 
 ```python
 def reply(self, msg: Message, session: Session) -> str | None:
-    messages = self._build_messages(session)
+    system = self._compose_system(msg.content)          # 现取现拼（知识按 query 检索）
+    messages = self._build_messages(system, session)
 
-    # transport 注入优先（离线测试/自定义后端），短路掉真实网络与 key 校验
-    if self._transport is not None:
+    if self._transport is not None:                     # 注入优先，短路网络
         result = self._transport(messages)
-        return result if isinstance(result, str) and result else self._fallback
-
-    if not self._api_key:
+        text = result if isinstance(result, str) and result else self._fallback
+    elif not self._api_key:
         print("[LLMHandler] 未配置 LLM_API_KEY，使用兜底话术", file=sys.stderr)
-        return self._fallback
+        text = self._fallback
+    else:
+        text = self._call_api(messages)
 
-    return self._call_api(messages)
+    return self._postprocess(text, session)             # 剥离 [[转人工]]，标记 needs_human
 ```
 
 ---
 
 # 3. system prompt 三级组装
 
-`LLMHandler._load_system_prompt()` 按以下优先级，**高优先级覆盖低优先级**：
+`LLMHandler._compose_system(query)` 按以下优先级，**高优先级覆盖低优先级**：
 
 | 优先级 | 来源 | 环境变量 | 说明 |
 |--------|------|----------|------|
-| 1（最高） | 环境变量完全覆盖 | `LLM_SYSTEM_PROMPT` | 若设置，直接用它，不再读文件 |
-| 2 | 人设文件 + 知识文件拼装 | `LLM_PERSONA_FILE` + `LLM_KNOWLEDGE_FILE` | 默认 `prompts/persona.md` + `prompts/knowledge.md` |
+| 1（最高） | 环境变量完全覆盖 | `LLM_SYSTEM_PROMPT` | 若设置，直接用它，不再读 persona/知识 |
+| 2 | persona 文件 + 知识模块检索 | `LLM_PERSONA_FILE` + 可插拔 `KnowledgeProvider` | 默认 `prompts/persona.md` + `StaticKnowledgeProvider`（可切 rag/structured/hybrid） |
 | 3（兜底） | 内置默认 | — | 代码中写死的一段简短通用提示 |
 
-二级拼装的具体逻辑（代码）：
+二级拼装的具体逻辑（代码，节选）：
 
 ```python
-def _load_system_prompt(self) -> str:
-    override = os.environ.get("LLM_SYSTEM_PROMPT")
-    if override:
-        return override
-    persona = self._read_file(os.environ.get("LLM_PERSONA_FILE", "prompts/persona.md"))
-    knowledge = self._read_file(os.environ.get("LLM_KNOWLEDGE_FILE", "prompts/knowledge.md"))
-    if persona:
-        parts = [persona.strip()]
-        if knowledge:
-            parts.append("# 店铺知识（回答一律以此为准）\n\n" + knowledge.strip())
-        return "\n\n".join(parts)
-    return self._DEFAULT_SYSTEM
+def _compose_system(self, query: str) -> str:
+    if self._override:                                     # LLM_SYSTEM_PROMPT
+        return self._override
+    base = self._persona.strip() if self._persona else self._DEFAULT_SYSTEM
+    parts = [base]
+    knowledge = self._knowledge.retrieve(query).strip()    # 按 query 现取现拼
+    if knowledge:
+        parts.append("# 店铺知识（回答一律以此为准）\n\n" + knowledge)
+    return "\n\n".join(parts)
 ```
 
-- 路径支持相对路径（以项目根为基准解析）或绝对路径。
-- 文件读取失败（OSError）时返回空字符串，不会抛异常导致启动失败。
-- 知识库文档面向运营，详见 [`prompts/persona.md`](../../prompts/persona.md) 与 [`prompts/knowledge.md`](../../prompts/knowledge.md)。
+- **知识来自可插拔的 `KnowledgeProvider.retrieve(query)`**（见 [知识模块设计](05-知识模块设计.md)）：`Static` 返回全量、`Rag` 返回按 query 检索的相关片段、`Structured` 返回命中商品、`Hybrid` 组合。因此每条消息**现取现拼** system prompt，换知识后端（`KNOWLEDGE_PROVIDER`）无需改 `LLMHandler`。
+- persona 在构造时读入；`_read_file` 失败（OSError）返回空字符串，不抛异常导致启动失败。
+- 知识资产面向运营，详见 [`prompts/persona.md`](../../prompts/persona.md)、[`prompts/knowledge.md`](../../prompts/knowledge.md) 与 [`prompts/products.json`](../../prompts/products.json)。
 
 ---
 
@@ -128,8 +123,8 @@ def _load_system_prompt(self) -> str:
 ## 4.2 角色映射与昵称前缀
 
 ```python
-def _build_messages(self, session: Session) -> list[dict]:
-    messages: list[dict] = [{"role": "system", "content": self._system_prompt}]
+def _build_messages(self, system: str, session: Session) -> list[dict]:
+    messages: list[dict] = [{"role": "system", "content": system}]
     for m in list(session.history)[-self._max_history:]:
         content = (m.content or "").strip()
         if not content:
@@ -165,7 +160,7 @@ def _build_messages(self, session: Session) -> list[dict]:
 | 异常类型 | 降级行为 | stderr 日志示例 |
 |----------|----------|-----------------|
 | `HTTPError` | 返回兜底 | `HTTP 401 请求失败，已降级: ...` |
-| `URLError` / `TimeoutError` | 返回兜底 | `网络错误，已降级: TimeoutError` |
+| `URLError` / `TimeoutError` / `socket.timeout` | 返回兜底 | `网络错误，已降级: timeout` |
 | `JSONDecodeError` | 返回兜底 | `响应 JSON 解析失败，已降级` |
 | 响应结构异常（KeyError/IndexError/TypeError） | 返回兜底 | `响应结构异常，已降级` |
 | 模型返回空内容 | 返回兜底 | `模型返回空内容，已降级` |
@@ -233,9 +228,11 @@ LLM_MODEL=deepseek-v4-flash
 `LLMHandler.__init__` 接受可选参数 `transport`：
 
 ```python
-def __init__(self, *, transport: Callable[[list[dict]], str] | None = None) -> None:
+def __init__(self, *, transport: Callable[[list[dict]], str] | None = None,
+             knowledge: KnowledgeProvider | None = None) -> None:
     ...
     self._transport = transport
+    self._knowledge = knowledge or StaticKnowledgeProvider(...)   # 默认全量；可注入 rag/structured/hybrid
 ```
 
 - 当 `transport` 不为 `None` 时，`reply()` 会**短路**真实网络请求与 API key 校验，直接把组装好的 `messages` 交给 `transport` 函数，并返回其结果。

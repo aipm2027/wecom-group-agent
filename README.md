@@ -10,26 +10,30 @@
 
 ```
 wecom-group-agent/
-├── main.py              # 程序入口（python3 main.py）
-├── core/                # 后端核心引擎（传输无关）
+├── main.py              # 程序入口（装配 adapter/handler/knowledge/session 后启动）
+├── core/                # 后端核心引擎（传输无关，纯 stdlib）
 │   ├── message.py       #   规范化消息 Message + BOT_SENDER_ID
 │   ├── adapter.py       #   Adapter 抽象（start/send）
-│   ├── router.py        #   路由：去重/触发/限流/回发/记忆
+│   ├── router.py        #   路由：去重/触发/限流/接管静默/回发/记忆/on_escalate
 │   ├── handler.py       #   Handler 抽象 + EchoHandler（占位）
-│   ├── llm_handler.py   #   LLMHandler（真大脑，调 StepFun）
-│   └── session.py       #   会话上下文（内存）
+│   ├── llm_handler.py   #   LLMHandler（真大脑，调 StepFun；[[转人工]] 标记剥离）
+│   ├── knowledge.py     #   知识模块：Static / Rag / Structured / Hybrid 四实现
+│   ├── session.py       #   会话上下文（内存版 SessionStore，线程安全）
+│   └── session_sqlite.py#   SqliteSessionStore（SQLite 持久化，重启恢复）
 ├── adapters/            # 传输适配器（可插拔）
 │   ├── mock_cli.py      #   本地模拟（交互/JSON 脚本）
-│   └── ntwork_wecom.py  #   企微群 hook（仅 Windows，stub 待实现）
-├── prompts/             # 人设 + 知识库（可编辑资产）
+│   ├── ntwork_wecom.py  #   企微群 hook（仅 Windows，stub 待实现）
+│   ├── wecom_kf.py      #   微信客服适配器（官方合规 1:1，已实现）
+│   └── wecom_crypto.py  #   企微回调加解密（纯 Python AES-256 / WXBizMsgCrypt）
+├── api_server.py        # REST API 层（运营后台，stdlib http.server）
+├── prompts/             # 人设 + 知识资产（可编辑）
 │   ├── persona.md       #   私域导购人设
-│   └── knowledge.md     #   店铺/产品/FAQ（当前为样例，待替换）
-├── tests/               # 离线测试
-│   └── test_llm_offline.py
-├── examples/            # 样例与评测
-│   ├── sample.json      #   mock 脚本样例
-│   └── demo_agent.py    #   9 场景私域维护评测
-├── docs/                # 文档（见下）
+│   ├── knowledge.md     #   店铺/产品/FAQ（样例，待替换）
+│   └── products.json    #   结构化商品库样例（structured/hybrid 用）
+├── tests/               # 离线测试（10 套，全绿）
+├── examples/            # 样例与评测（sample.json / demo_agent.py）
+├── docs/                # 文档（需求/技术/测试三大块，见下）
+├── .github/workflows/   # GitHub Actions CI（多版本跑全部离线测试）
 ├── .env.example         # 配置模板（复制为 .env 填真实值）
 └── .gitignore
 ```
@@ -45,11 +49,20 @@ MOCK=1 HANDLER=echo python3 main.py
 cp .env.example .env         # 填入 LLM_API_KEY 等
 MOCK=1 HANDLER=llm python3 main.py
 
-# 3) 离线单测
-python3 tests/test_llm_offline.py
+# 3) 选知识后端（默认 static；rag 向量检索 / structured 结构化商品库 / hybrid 组合）
+MOCK=1 HANDLER=llm KNOWLEDGE_PROVIDER=hybrid python3 main.py
 
-# 4) 9 场景私域维护评测（真调 LLM）
-python3 examples/demo_agent.py
+# 4) 会话持久化（重启不丢历史与接管状态）
+STORE=sqlite MOCK=1 HANDLER=llm python3 main.py
+
+# 5) 微信客服（官方合规 1:1，需公网回调 + .env 配 WECOM_*）
+ADAPTER=kf HANDLER=llm python3 main.py
+
+# 6) 运营后台 REST API（会话/接管/试聊/指标）
+ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
+
+# 7) 全部离线测试（10 套）
+for f in tests/test_*.py; do python3 "$f"; done
 ```
 
 配置项见 [.env.example](.env.example)。当前 LLM 用 StepFun（阶跃星辰，OpenAI 兼容），换模型/换 Claude 只改 `LLM_BASE_URL`/`LLM_MODEL`。
@@ -71,7 +84,9 @@ python3 examples/demo_agent.py
 ## 当前进度
 
 - ✅ 传输无关架构 + mock 全链路在 Mac 跑通（触发/去重/限流/多轮）
-- ✅ LLMHandler 接 StepFun，人设+知识文件化，9 场景评测
-- ✅ 知识做成可插拔模块：StaticKnowledgeProvider + 优化版 RagKnowledgeProvider（混合检索/小库直通/never-worse 兜底，纯 stdlib）
-- ⏳ 真实企微群 hook（`ntwork`）——待 Windows 环境
-- ⏳ 微信客服适配器（合规 1:1）——待接入
+- ✅ LLMHandler 接 StepFun，人设+知识文件化；`[[转人工]]` 标记剥离 + 网络异常降级
+- ✅ 可插拔知识模块：Static / RAG（混合检索）/ 结构化商品库 / Hybrid，`KNOWLEDGE_PROVIDER` 一键切换
+- ✅ 人工接管：转人工信号 + 接管静默 + REST API（`/api/queue`、takeover/release）
+- ✅ SQLite 持久化（`STORE=sqlite`，重启恢复）+ REST API 运营后台 + GitHub Actions CI（Py 3.9–3.12）
+- ✅ 微信客服适配器（官方合规 1:1，纯 Python AES-256 回调加解密）——代码就绪，真机公网回调联调待验证
+- ⏳ 真实企微群 hook（`ntwork`）——待 Windows 环境实机
