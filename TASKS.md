@@ -39,6 +39,18 @@ python3 tests/test_rag_offline.py
 > - 本机全量 `tests/test_*.py`（9 个）全绿；CI 就绪（3.9–3.12）。
 > - 留给 owner（未动免抢文件）：`.env.example` 可补 `KNOWLEDGE_PROVIDER` 与 `LLM_EMBED_URL`/`LLM_EMBED_MODEL` 说明。
 
+> **CONV-B 全局审查（2026-07-08，59 条发现经对抗验证去伪）**
+> 已修并推送（CONV-B 文件，`1c68ee0`）：wecom_kf `_sync_msg` 校验 errcode + 分页拉取、缺 `WECOM_ENCODING_AES_KEY` 友好报错、wecom_crypto 密文长度校验统一抛 `WeComCryptError`、knowledge RAG embedding 捕获 `socket.timeout`、`main.py` 加 `STORE=sqlite` 开关 + 默认 `on_escalate` 日志。
+> **待 CONV-A 处理（其文件，我未改）**——多为 `api_server.py` 用 `ThreadingHTTPServer` 才触发的并发问题：
+> - **[high] `api_server.py build_app()` 硬编码 `adapter=None`** → 运营后台"人工发消息"永远 `sent=False`、触达不了用户。建议复用 `main.py` 的 `build_adapter()`。
+> - **[high] `api_server.py _preview_seq += 1` 非原子** → 多线程重复 msg_id，配 SQLite `INSERT OR IGNORE` 会静默丢消息。建议 `threading.Lock`/`itertools.count`。
+> - **[high] `SessionStore.get`/`SqliteSessionStore.get`(_live) 无锁 check-then-act** → 并发下同一 chat_id 产生多个 Session、历史分叉（已复现）。建议加锁（SqliteSessionStore 的 lock 改 `RLock` 并覆盖 `_live` 读写与 `all()`）。
+> - **[high] `SqliteSessionStore._persist_message/_persist_flags` 无 try/except** → DB 满/锁定时异常穿透 `Router.on_message` 中断处理。建议 `except sqlite3.Error` 记日志后继续。
+> - **[medium] `api_server` 无请求体大小上限**（超大 Content-Length 耗内存；默认仅绑 127.0.0.1，风险有限）；**对不存在 chat_id 自动建空会话不返回 404**；**`llm_handler` 的 `except (URLError, TimeoutError)` 未含 `socket.timeout`**（同 knowledge.py 已修点）。
+> - **[low] `ADMIN_TOKEN` 用 `==` 比较**（时序攻击，本地服务风险低）→ 建议 `hmac.compare_digest`。
+> - **[medium] 文档滞后**：`docs/技术文档/04/05/06` 仍称 RAG/StructuredKB/微信客服"未实现/规划/NotImplemented"，实际已落地——建议同步这几处状态。
+> 对抗验证已排除的假阳性：should_respond 未过滤 bot 自身消息（各适配器不回传 bot 消息，不可达）、Router.send 未 try/except（唯一真适配器 send 已自兜底）、Router `_seen/_last_reply_at` 线程安全（on_message 只在单线程适配器上跑，非 api_server）。
+
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
 - 密钥只进 `.env`（已 gitignore），**绝不提交**；日志不打印 key。
