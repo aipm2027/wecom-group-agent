@@ -101,7 +101,7 @@
 | Ntwork 适配器 | `adapters/ntwork_wecom.py` | 🟡 Stub | 待 Windows 实机 | 文件顶部注释已写实现框架，当前抛 `NotImplementedError` |
 | 微信客服适配器 | `adapters/wecom_kf.py` + `adapters/wecom_crypto.py` | ✅ 已实现 | 公网回调联调 | 官方合规 1:1，需公网回调+AES 解密；加密走纯 Python 自实现（AES-256-CBC + PKCS7 + SHA1），等价 WXBizMsgCrypt |
 | Router | `core/router.py` | ✅ 已实现 | — | 去重/触发/限流/回发/记忆流水线；已支持 `human_controlled` 静默逻辑 |
-| Handler 抽象 | `core/handler.py` | ✅ 已实现 | — | `EchoHandler` 占位 + `LLMHandler` 真大脑 |
+| Handler 抽象 | `core/handler.py` | ✅ 已实现 | — | `Handler` 抽象 + `EchoHandler` 占位复读机（`LLMHandler` 见下行） |
 | LLMHandler | `core/llm_handler.py` | ✅ 已实现 | 持续优化 | 纯 `urllib` 调 OpenAI 兼容接口；system prompt 三级组装；识别 `[[转人工]]` 控制标记并剥离；支持 `transport` 注入测试 |
 | KnowledgeProvider | `core/knowledge.py` | ✅ 已实现 | 持续扩展 | `StaticKnowledgeProvider` 默认；`RagKnowledgeProvider` 已实现（语义 embedding + 混合检索 + 缓存）；`StructuredKnowledgeProvider` 已实现（精确商品查询）；`HybridKnowledgeProvider` 已实现（组合兜底） |
 | Session/SessionStore | `core/session.py` | ✅ 已实现 | — | `deque(maxlen=20)`；已扩展 `human_controlled`/`needs_human`/`escalation_reason` 字段及 `take_over()`/`release()`/`mark_needs_human()` |
@@ -290,7 +290,7 @@
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/queue` | 人工工作台收件箱 | 返回 `needs_human=True` 且 `human_controlled=False`（未接管）的会话列表，按 `last_active_at` 倒序 |
+| `GET` | `/api/queue` | 人工工作台收件箱 | 返回 `needs_human=True` 且 `human_controlled=False`（未接管）的会话列表（内存版按插入顺序、SQLite 版按 `updated_at` 倒序） |
 
 > 说明：`/api/queue` 是运营后台"待处理"视图的核心接口，客服先从此列表取会话，再调用 `takeover` 接管。
 
@@ -447,7 +447,7 @@
 
 | 决策 | 说明 |
 |------|------|
-| **结构化 escalation 信号** | **已实现**：不是让客户看到"转人工"纯话术，而是 LLM 在回复中插入 `[[转人工]]` 控制标记（`ESCALATE_TAG`）。`LLMHandler` 解析输出，**剥离该标记**（客户不可见），并调用 `session.mark_needs_human(reason)` 设置结构化状态。`Router` 的 `on_escalate` 回调负责发送安抚话术。`prompts/persona.md` 中已追加"转人工时追加控制标记"的指令。 |
+| **结构化 escalation 信号** | **已实现**：不是让客户看到"转人工"纯话术，而是 LLM 在回复中插入 `[[转人工]]` 控制标记（`ESCALATE_TAG`）。`LLMHandler` 解析输出，**剥离该标记**（客户不可见），并调用 `session.mark_needs_human(reason)` 设置结构化状态。`Router` 检测到 `needs_human` 时触发 `on_escalate` 回调（`main.py` 默认实现仅打印 stderr；生产可换成发送安抚话术/写工单/通知工作台）。`prompts/persona.md` 中已追加"转人工时追加控制标记"的指令。 |
 | **静默模式** | **已实现**：`session.human_controlled = True` 时，`Router` 在 `on_message` 中只将消息记入 `Session.history`，**不调 `handler.reply()`**，agent 完全静默。人工客服通过 API 发送的消息走正常 `adapter.send()` 通道。 |
 | **释放机制** | **已实现**：人工客服通过 `POST /api/conversations/{id}/release` 主动释放；释放后 `human_controlled=False`，agent 恢复自动回复。当前未实现超时自动释放（可后续扩展）。 |
 | **建议模式** | 规划（P2）：支持 agent 在后台继续推理给人工客服提供回复建议，但由人工决定是否发送。默认当前为完全静默模式。 |
@@ -487,13 +487,13 @@ class SessionStore:
 | **存储范围** | `MessageRecord`（全量消息）+ `Session` 元数据（`human_controlled`、`needs_human`、`escalation_reason`、最后活跃时间）。不存 LLM 原始响应（仅存最终发送给用户的文本）。 |
 | **接口兼容** | `SqliteSessionStore` 保持与内存 `SessionStore` 同接口：`get(chat_id) -> Session`、`all() -> list[Session]`。Router 与 Handler 零改动。 |
 | **写穿透** | `Session` 注册 `on_message`/`on_flags` 钩子，`SqliteSessionStore` 在钩子中实时写入 `messages`/`sessions` 表，无需显式 `save()` 调用。 |
-| **MAX_CONTEXT 语义保留** | 查询时按 `ORDER BY timestamp DESC LIMIT 20` 取最近消息，再按时间正序送入 LLMHandler，与内存 `deque(maxlen=20)` 语义一致。 |
+| **MAX_CONTEXT 语义保留** | 查询时按 `ORDER BY id DESC LIMIT ?`（`?`=MAX_CONTEXT；自增主键 `id` 近似插入顺序）取最近消息，再按时间正序送入 LLMHandler，与内存 `deque(maxlen=20)` 语义一致。 |
 | **去重** | `messages` 表设 `UNIQUE(chat_id, msg_id)`，重复消息自动丢弃。 |
 | **重启恢复** | 进程重启后，`SqliteSessionStore.get(chat_id)` 从 SQLite 读取最近 N 条历史重构 `Session`；同时恢复 `human_controlled`/`needs_human`/`escalation_reason` 状态，确保接管/转人工不丢失。 |
 | **BOT_SENDER_ID 消息也需持久化** | 否则进程重启后，机器人自己的回复丢失，多轮上下文断裂。 |
 | **读写分离** | 高频写入（每条消息）直接写 SQLite；读取（运营后台查询、LLM 上下文组装）走同一个库。SQLite 在单进程/低并发场景足够；若以后需高并发，可换 PostgreSQL/Redis，但当前不需要。 |
 | **迁移方式** | `main.py` 中通过环境变量 `STORE=memory`（默认）/ `sqlite` 切换；切换后内存版数据不做迁移（数据量小，可接受冷启动），运营后台历史数据从 SQLite 重新查询。 |
-| **索引** | `chat_id` + `timestamp` 联合索引；`msg_id` 唯一索引（去重）；`sender_id` 索引（客户画像聚合）。 |
+| **索引** | 实际 schema：`messages(chat_id, id)` 联合索引 + `UNIQUE(chat_id, msg_id)` 复合唯一约束（去重）。`sender_id` / `timestamp` 索引为规划（当前未建）。 |
 
 源码：`core/session_sqlite.py`（[查看](../../core/session_sqlite.py)）。
 

@@ -37,7 +37,7 @@ Router 通过 `handler.reply(msg, session)` 调用，完全不关心内部是规
 handler_type = os.environ.get("HANDLER", "echo")
 if handler_type == "llm":
     from core.llm_handler import LLMHandler
-    return LLMHandler()
+    return LLMHandler(knowledge=build_knowledge())   # 注入按 KNOWLEDGE_PROVIDER 选的知识后端
 if handler_type == "my_custom":
     from core.my_handler import MyHandler
     return MyHandler()
@@ -195,7 +195,7 @@ self._fallback = "不好意思，我这边有点忙，稍后回复你哈~"
 | `LLM_MAX_HISTORY` | `10` | 进入上下文的最近历史消息条数。 |
 | `LLM_PERSONA_FILE` | `prompts/persona.md` | 人设文件路径，支持相对/绝对路径。 |
 | `LLM_KNOWLEDGE_FILE` | `prompts/knowledge.md` | 知识文件路径，支持相对/绝对路径。 |
-| `LLM_SYSTEM_PROMPT` | `None` | **若设置，直接覆盖所有 system prompt，不再读 persona/knowledge 文件。** |
+| `LLM_SYSTEM_PROMPT` | `""`（空字符串） | **若设置（非空），直接覆盖所有 system prompt，不再读 persona/knowledge。** |
 
 > 老模型名 `deepseek-chat` / `deepseek-reasoner` 已于 2026-07-24 停用，代码中已使用新名称。
 
