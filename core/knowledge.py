@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import re
+import socket
 import sys
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -173,7 +174,7 @@ class RagKnowledgeProvider(KnowledgeProvider):
             except Exception:
                 pass
             raise RuntimeError(f"embedding HTTP {exc.code}: {detail}") from exc
-        except (URLError, TimeoutError) as exc:
+        except (URLError, TimeoutError, socket.timeout) as exc:
             raise RuntimeError(f"embedding 网络错误: {exc.__class__.__name__}") from exc
 
         try:
