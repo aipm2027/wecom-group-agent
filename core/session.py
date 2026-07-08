@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import threading
 from collections import deque
 from dataclasses import dataclass, field
 from typing import Callable, Deque, Optional
@@ -62,14 +63,17 @@ class SessionStore:
 
     def __init__(self) -> None:
         self._sessions: dict[str, Session] = {}
+        self._lock = threading.Lock()  # 多线程（如 api_server 的 ThreadingHTTPServer）下保护 get/all
 
     def get(self, chat_id: str) -> Session:
-        s = self._sessions.get(chat_id)
-        if s is None:
-            s = Session(chat_id=chat_id)
-            self._sessions[chat_id] = s
-        return s
+        with self._lock:
+            s = self._sessions.get(chat_id)
+            if s is None:
+                s = Session(chat_id=chat_id)
+                self._sessions[chat_id] = s
+            return s
 
     def all(self) -> list[Session]:
         """返回所有会话（供管理后台/API 列会话用）。"""
-        return list(self._sessions.values())
+        with self._lock:
+            return list(self._sessions.values())

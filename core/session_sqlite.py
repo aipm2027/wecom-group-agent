@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import sys
 import threading
 import time
 
@@ -50,7 +51,7 @@ class SqliteSessionStore:
     def __init__(self, path: str = "data/sessions.db") -> None:
         self._path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
-        self._lock = threading.Lock()  # http.server 多线程下串行化写
+        self._lock = threading.RLock()  # 可重入：get() 持锁期间 _hydrate() 会再次进锁
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
@@ -58,18 +59,20 @@ class SqliteSessionStore:
 
     # --- 对外接口（与 SessionStore 相同）---
     def get(self, chat_id: str) -> Session:
-        if chat_id in self._live:
-            return self._live[chat_id]
-        session = self._hydrate(chat_id)
-        self._live[chat_id] = session
-        return session
+        with self._lock:
+            if chat_id in self._live:
+                return self._live[chat_id]
+            session = self._hydrate(chat_id)
+            self._live[chat_id] = session
+            return session
 
     def all(self) -> list[Session]:
         with self._lock:
             rows = self._conn.execute("SELECT chat_id FROM sessions ORDER BY updated_at DESC").fetchall()
-        for (chat_id,) in rows:
-            self.get(chat_id)
-        return list(self._live.values())
+            for (chat_id,) in rows:
+                if chat_id not in self._live:
+                    self._live[chat_id] = self._hydrate(chat_id)
+            return list(self._live.values())
 
     def close(self) -> None:
         with self._lock:
@@ -104,28 +107,35 @@ class SqliteSessionStore:
     # --- 写穿透 ---
     def _persist_message(self, session: Session, msg: Message) -> None:
         now = time.time()
-        with self._lock:
-            self._conn.execute(
-                "INSERT OR IGNORE INTO sessions(chat_id, updated_at) VALUES(?, ?)",
-                (session.chat_id, now))
-            self._conn.execute(
-                "INSERT OR IGNORE INTO messages"
-                "(chat_id, msg_id, chat_type, sender_id, sender_name, content, msg_type, is_at_bot, timestamp, created_at)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?)",
-                (msg.chat_id, msg.msg_id, msg.chat_type, msg.sender_id, msg.sender_name,
-                 msg.content, msg.msg_type, int(msg.is_at_bot), msg.timestamp, now))
-            self._conn.execute("UPDATE sessions SET updated_at=? WHERE chat_id=?", (now, session.chat_id))
-            self._conn.commit()
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO sessions(chat_id, updated_at) VALUES(?, ?)",
+                    (session.chat_id, now))
+                self._conn.execute(
+                    "INSERT OR IGNORE INTO messages"
+                    "(chat_id, msg_id, chat_type, sender_id, sender_name, content, msg_type, is_at_bot, timestamp, created_at)"
+                    " VALUES(?,?,?,?,?,?,?,?,?,?)",
+                    (msg.chat_id, msg.msg_id, msg.chat_type, msg.sender_id, msg.sender_name,
+                     msg.content, msg.msg_type, int(msg.is_at_bot), msg.timestamp, now))
+                self._conn.execute("UPDATE sessions SET updated_at=? WHERE chat_id=?", (now, session.chat_id))
+                self._conn.commit()
+        except sqlite3.Error as exc:
+            # DB 满/锁定/只读等：记日志但不上抛，避免中断 Router 的消息处理主链路
+            print(f"[SqliteSessionStore] 持久化消息失败（已忽略）: {exc}", file=sys.stderr)
 
     def _persist_flags(self, session: Session) -> None:
         now = time.time()
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO sessions(chat_id, human_controlled, needs_human, escalation_reason, updated_at) "
-                "VALUES(?,?,?,?,?) "
-                "ON CONFLICT(chat_id) DO UPDATE SET "
-                "human_controlled=excluded.human_controlled, needs_human=excluded.needs_human, "
-                "escalation_reason=excluded.escalation_reason, updated_at=excluded.updated_at",
-                (session.chat_id, int(session.human_controlled), int(session.needs_human),
-                 session.escalation_reason, now))
-            self._conn.commit()
+        try:
+            with self._lock:
+                self._conn.execute(
+                    "INSERT INTO sessions(chat_id, human_controlled, needs_human, escalation_reason, updated_at) "
+                    "VALUES(?,?,?,?,?) "
+                    "ON CONFLICT(chat_id) DO UPDATE SET "
+                    "human_controlled=excluded.human_controlled, needs_human=excluded.needs_human, "
+                    "escalation_reason=excluded.escalation_reason, updated_at=excluded.updated_at",
+                    (session.chat_id, int(session.human_controlled), int(session.needs_human),
+                     session.escalation_reason, now))
+                self._conn.commit()
+        except sqlite3.Error as exc:
+            print(f"[SqliteSessionStore] 持久化状态失败（已忽略）: {exc}", file=sys.stderr)
