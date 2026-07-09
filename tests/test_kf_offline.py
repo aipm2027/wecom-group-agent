@@ -431,6 +431,16 @@ def test_token_shared_across_instances() -> None:
             os.unlink(tf)
 
 
+def test_parse_content_length_hardening() -> None:
+    """公网回调的 Content-Length 防护：负数/非法/缺失一律按 0，防 rfile.read(-1) 阻塞线程。"""
+    from adapters.wecom_kf import _parse_content_length
+    assert _parse_content_length("123") == 123
+    assert _parse_content_length("-1") == 0, "负数必须归 0，否则 read(-1) 会阻塞到 EOF"
+    assert _parse_content_length("abc") == 0
+    assert _parse_content_length(None) == 0
+    assert _parse_content_length("") == 0
+
+
 def main() -> None:
     for fn in (
         test_encoding_aes_key_valid,
@@ -450,6 +460,7 @@ def main() -> None:
         test_access_token_cached,
         test_access_token_invalidated_on_errcode,
         test_token_shared_across_instances,
+        test_parse_content_length_hardening,
     ):
         fn()
         print(f"通过: {fn.__name__}")
