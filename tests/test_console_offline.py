@@ -7,7 +7,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from admin_console import _COOKIE, ConsoleApp  # noqa: E402
+from admin_console import _COOKIE, ConsoleApp, _default_fetcher  # noqa: E402
 
 
 def _fake_fetcher(calls):
@@ -123,6 +123,34 @@ def test_unknown_path_404_and_bad_login_body():
     print("test_unknown_path_404_and_bad_login_body ok")
 
 
+def test_proxy_preserves_query_string():
+    calls = []
+    app = ConsoleApp(api_base="http://api:8080", admin_token="t", password="pw",
+                     fetcher=_fake_fetcher(calls))
+    _, _, cookie = _login(app, "pw")
+    status, _, _, _ = app.handle("GET", "/api/conversations?limit=5", b"", {"cookie": cookie})
+    assert status == 200
+    assert calls[0]["url"] == "http://api:8080/api/conversations?limit=5"  # ?limit 必须透传
+    print("test_proxy_preserves_query_string ok")
+
+
+def test_default_fetcher_conn_refused_502():
+    # 真走 _default_fetcher 的异常转换分支:连回环拒绝端口,无外网、快速失败
+    status, body = _default_fetcher("GET", "http://127.0.0.1:1/api/health", b"", {})
+    assert status == 502 and b"unreachable" in body
+    print("test_default_fetcher_conn_refused_502 ok")
+
+
+def test_handle_catches_fetcher_crash():
+    def crash(method, url, body, headers):
+        raise RuntimeError("boom")
+    app = ConsoleApp(admin_token="t", password="pw", fetcher=crash)
+    _, _, cookie = _login(app, "pw")
+    status, _, body, _ = app.handle("GET", "/api/metrics", b"", {"cookie": cookie})
+    assert status == 500 and b"internal error" in body  # 兜底不崩进程
+    print("test_handle_catches_fetcher_crash ok")
+
+
 if __name__ == "__main__":
     test_login_required_and_flow()
     test_proxy_injects_token_and_strips_from_client()
@@ -131,4 +159,7 @@ if __name__ == "__main__":
     test_logout_invalidates_cookie()
     test_fetcher_error_becomes_502()
     test_unknown_path_404_and_bad_login_body()
+    test_proxy_preserves_query_string()
+    test_default_fetcher_conn_refused_502()
+    test_handle_catches_fetcher_crash()
     print("admin_console 离线测试全部通过")

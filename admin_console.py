@@ -35,8 +35,11 @@ def _default_fetcher(method: str, url: str, body: bytes, headers: dict) -> tuple
     try:
         with urllib.request.urlopen(req, timeout=_PROXY_TIMEOUT) as resp:
             return resp.status, resp.read()
-    except urllib.error.HTTPError as exc:  # 4xx/5xx 也带响应体，原样透传
-        return exc.code, exc.read()
+    except urllib.error.HTTPError as exc:  # 4xx/5xx 也带响应体,原样透传
+        try:
+            return exc.code, exc.read()
+        except OSError:  # 读上游错误体再失败,不让异常逃出兜底
+            return exc.code, b'{"error": "upstream read failed"}'
     except (urllib.error.URLError, OSError, ValueError) as exc:
         detail = json.dumps({"error": "api unreachable", "detail": str(exc)[:200]}, ensure_ascii=False)
         return 502, detail.encode("utf-8")
@@ -69,14 +72,22 @@ class ConsoleApp:
 
     # --- 主入口 ---
     def handle(self, method: str, path: str, body: bytes, headers: dict):
-        if path == "/login" and method == "POST":
+        try:
+            return self._route(method, path, body, headers)
+        except Exception as exc:  # noqa: BLE001  # 与 ApiApp 一致:任何未预期异常不崩进程
+            detail = json.dumps({"error": "internal error", "detail": str(exc)[:200]}, ensure_ascii=False)
+            return 500, "application/json", detail.encode("utf-8"), {}
+
+    def _route(self, method: str, path: str, body: bytes, headers: dict):
+        route = path.partition("?")[0]  # 路由匹配去掉 query;代理时保留完整 path(?limit= 等要透传)
+        if route == "/login" and method == "POST":
             return self._login(body)
-        if path == "/logout" and method == "POST":
+        if route == "/logout" and method == "POST":
             self._sessions.discard(self._cookie_of(headers))
             return 200, "application/json", b'{"ok": true}', {"Set-Cookie": f"{_COOKIE}=; Max-Age=0; Path=/"}
-        if path.startswith("/api/"):
+        if route.startswith("/api/"):
             return self._proxy(method, path, body, headers)
-        if path == "/" and method == "GET":
+        if route == "/" and method == "GET":
             page = CONSOLE_HTML if self._authed(headers) else LOGIN_HTML
             return 200, "text/html; charset=utf-8", page.encode("utf-8"), {}
         return 404, "application/json", b'{"error": "not found"}', {}
@@ -112,13 +123,16 @@ class ConsoleApp:
 def _make_handler(app: ConsoleApp):
     class Handler(BaseHTTPRequestHandler):
         def _run(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:  # Content-Length 缺失/非法/负数一律按 0(负数会让 read(-1) 阻塞读到 EOF)
+                length = max(0, int(self.headers.get("Content-Length", 0) or 0))
+            except ValueError:
+                length = 0
             if length > _MAX_BODY:
                 self._respond(413, "application/json", b'{"error": "payload too large"}', {})
                 return
             body = self.rfile.read(length) if length else b""
             headers = {k.lower(): v for k, v in self.headers.items()}
-            status, ctype, data, extra = app.handle(method, self.path.split("?")[0], body, headers)
+            status, ctype, data, extra = app.handle(method, self.path, body, headers)
             self._respond(status, ctype, data, extra)
 
         def _respond(self, status: int, ctype: str, data: bytes, extra: dict) -> None:
@@ -221,14 +235,19 @@ main{flex:1;display:flex;min-height:0}
 <div class="row"><button onclick="closePreview()">关闭</button><button class="primary" id="pvbtn" onclick="runPreview()">发送测试</button></div>
 </div></div>
 <script>
-let tab='all', active=null, convs=[], timer=null;
+let tab='all', active=null, convs=[], timer=null, lastNetToast=0;
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(method,path,body){
-  const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},
-    body:body?JSON.stringify(body):undefined});
-  if(r.status===401){location.reload();return null}
-  return r.json().catch(()=>({}));
+  try{
+    const r=await fetch(path,{method,headers:{'Content-Type':'application/json','X-Requested-With':'fetch'},
+      body:body?JSON.stringify(body):undefined});
+    if(r.status===401){location.reload();return null}
+    try{return await r.json()}catch(e){return {}}
+  }catch(e){ // 控制台进程挂/断网:不抛 unhandled rejection,轮询限流提示
+    if(Date.now()-lastNetToast>8000){lastNetToast=Date.now();toast('⚠️ 连接失败:控制台服务不可达')}
+    return null;
+  }
 }
 function toast(t){const d=document.createElement('div');d.className='toast';d.textContent=t;document.body.appendChild(d);setTimeout(()=>d.remove(),2200)}
 async function loadMetrics(){const m=await api('GET','/api/metrics');if(!m)return;
@@ -242,17 +261,21 @@ async function loadList(){
       ${c.needs_human?'<span class="tag need">待人工</span>':''}
       ${c.human_controlled?'<span class="tag human">已接管</span>':''}</div>
     <div class="last">${esc(c.last_message)||'（无消息）'}</div></div>`).join('')||'<div style="padding:20px;color:#bbb;font-size:13px;text-align:center">暂无会话</div>';
+  // 接管状态可能被别的运营者/标签页改掉:轮询时只刷新操作条,不动输入框(保护正在打的字)
+  if(active){const c=convs.find(x=>x.chat_id===active);const bar=$('convbar');if(c&&bar)bar.innerHTML=barHtml(c)}
 }
 function setTab(t){tab=t;document.querySelectorAll('#tabs div').forEach(d=>d.classList.toggle('on',d.dataset.t===t));loadList()}
 function pick(id){active=id;renderRight();loadMsgs();loadList()}
-function renderRight(){
-  const c=convs.find(x=>x.chat_id===active)||{};
-  $('right').innerHTML=`<div id="convbar"><span class="title">${esc(active)}</span>
+function barHtml(c){
+  return `<span class="title">${esc(active)}</span>
     <span class="reason">${esc(c.escalation_reason||'')}</span>
     ${c.human_controlled
       ?'<button onclick="release()">交回 AI</button>'
-      :'<button class="primary" onclick="takeover()">人工接管</button>'}
-  </div><div id="msgs"></div>
+      :'<button class="primary" onclick="takeover()">人工接管</button>'}`;
+}
+function renderRight(){
+  const c=convs.find(x=>x.chat_id===active)||{};
+  $('right').innerHTML=`<div id="convbar">${barHtml(c)}</div><div id="msgs"></div>
   <div id="inputbar"><textarea id="text" placeholder="以人工客服身份回复客户…（Ctrl/⌘+Enter 发送）"
     onkeydown="if((event.ctrlKey||event.metaKey)&&event.key==='Enter')send()"></textarea>
   <button id="sendbtn" onclick="send()">发送</button></div>`;
@@ -281,9 +304,11 @@ async function send(){
   else toast('发送失败：'+((r&&r.error)||'未知错误'));
 }
 async function takeover(){const r=await api('POST',`/api/conversations/${encodeURIComponent(active)}/takeover`);
-  if(r&&r.ok){toast('已接管，AI 已静默');await loadList();renderRight();loadMsgs()}}
+  if(r&&r.ok){toast('已接管，AI 已静默');await loadList();renderRight();loadMsgs()}
+  else toast('接管失败：'+((r&&r.error)||'服务不可达'))}
 async function release(){const r=await api('POST',`/api/conversations/${encodeURIComponent(active)}/release`);
-  if(r&&r.ok){toast('已交回 AI');await loadList();renderRight();loadMsgs()}}
+  if(r&&r.ok){toast('已交回 AI');await loadList();renderRight();loadMsgs()}
+  else toast('交回失败：'+((r&&r.error)||'服务不可达'))}
 function openPreview(){$('pvmask').style.display='flex'}
 function closePreview(){$('pvmask').style.display='none'}
 async function runPreview(){

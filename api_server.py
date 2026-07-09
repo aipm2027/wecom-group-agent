@@ -199,7 +199,10 @@ class ApiApp:
 def _make_handler(app: ApiApp):
     class Handler(BaseHTTPRequestHandler):
         def _run(self, method: str) -> None:
-            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:  # Content-Length 缺失/非法/负数一律按 0(负数会让 read(-1) 阻塞读到 EOF)
+                length = max(0, int(self.headers.get("Content-Length", 0) or 0))
+            except ValueError:
+                length = 0
             if length > _MAX_BODY:
                 data = b'{"error":"payload too large"}'
                 self.send_response(413)
