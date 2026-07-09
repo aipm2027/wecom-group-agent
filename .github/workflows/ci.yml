@@ -21,6 +21,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Syntax check (全量 py_compile)
+        run: python -m compileall -q main.py api_server.py core adapters tests examples
+
+      - name: Import smoke (入口模块可导入)
+        run: python -c "import main, api_server; main.build_knowledge()"
+
       - name: Run tests
         run: |
           for f in tests/test_*.py; do
