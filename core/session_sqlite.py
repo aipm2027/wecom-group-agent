@@ -53,6 +53,9 @@ class SqliteSessionStore:
         os.makedirs(os.path.dirname(self._path), exist_ok=True)
         self._lock = threading.RLock()  # 可重入：get() 持锁期间 _hydrate() 会再次进锁
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
+        # WAL + busy_timeout：main.py 与 api_server 双进程共享同一 db 时并发更友好，显著减少 "database is locked"
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
         self._live: dict[str, Session] = {}  # 活跃会话对象缓存（与内存版语义一致）

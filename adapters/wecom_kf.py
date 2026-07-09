@@ -14,6 +14,7 @@ import functools
 import json
 import os
 import sys
+import threading
 import time
 import xml.etree.ElementTree as ET
 from http.server import BaseHTTPRequestHandler
@@ -25,6 +26,14 @@ from urllib.request import Request, urlopen
 from core.adapter import Adapter, OnMessage
 from core.message import Message
 from adapters.wecom_crypto import WXBizMsgCrypt, WeComCryptError
+
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+# access_token 失效/非法相关 errcode：命中则主动清缓存，下次强制重取
+_AUTH_ERRCODES = {40001, 40014, 42001, 41001}
+# 回调只处理客户发来的消息(origin==3)；4=系统事件、5=接待人员/机器人自己发送，必须跳过以防自问自答
+_ORIGIN_CUSTOMER = 3
+_MAX_CALLBACK_BODY = 1024 * 1024  # 回调请求体上限 1MB，超出直接拒绝，防 XML 炸弹/内存耗尽
 
 
 class WecomKfAdapter(Adapter):
@@ -39,6 +48,7 @@ class WecomKfAdapter(Adapter):
         encoding_aes_key: str | None = None,
         callback_port: int | None = None,
         callback_path: str | None = None,
+        cursor_path: str | None = None,
         http_get_json: Callable[[str], dict] | None = None,
         http_post_json: Callable[[str, dict], dict] | None = None,
     ) -> None:
@@ -58,7 +68,11 @@ class WecomKfAdapter(Adapter):
         self._crypt = WXBizMsgCrypt(self.callback_token, self.encoding_aes_key, self.corp_id)
         self._access_token = ""
         self._token_expires = 0.0
-        self._cursor = ""
+        self._token_lock = threading.Lock()  # 保护 access_token 的 check-then-act，避免并发重复刷新
+        # cursor 持久化：进程重启后从上次位置续拉，避免重复/漏消息（写失败不影响功能）
+        self._cursor_path = (cursor_path if cursor_path is not None
+                             else os.path.join(_ROOT, "data", "wecom_kf_cursor.txt"))
+        self._cursor = self._load_cursor()
 
     # ------------------------------------------------------------------
     # 默认 HTTP 客户端(零第三方依赖)
@@ -95,26 +109,54 @@ class WecomKfAdapter(Adapter):
             return {}
 
     # ------------------------------------------------------------------
+    # cursor 持久化
+    # ------------------------------------------------------------------
+
+    def _load_cursor(self) -> str:
+        try:
+            with open(self._cursor_path, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+
+    def _persist_cursor(self, cursor: str) -> None:
+        try:
+            os.makedirs(os.path.dirname(self._cursor_path), exist_ok=True)
+            with open(self._cursor_path, "w", encoding="utf-8") as f:
+                f.write(cursor)
+        except OSError as exc:
+            print(f"[WecomKfAdapter] cursor 持久化失败(已忽略): {exc.__class__.__name__}", file=sys.stderr)
+
+    # ------------------------------------------------------------------
     # 企业微信 API 内部方法
     # ------------------------------------------------------------------
 
     def _get_access_token(self) -> str:
-        now = time.time()
-        if self._access_token and now < self._token_expires - 60:
+        # 双检锁：并发时只让一个线程真正刷新 token，其余复用结果
+        with self._token_lock:
+            now = time.time()
+            if self._access_token and now < self._token_expires - 60:
+                return self._access_token
+            url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={self.corp_id}&corpsecret={self.kf_secret}"
+            try:
+                data = self._http_get_json(url)
+            except Exception as exc:
+                print(f"[WecomKfAdapter] 获取 access_token 失败: {exc.__class__.__name__}", file=sys.stderr)
+                return ""
+            if not isinstance(data, dict) or "access_token" not in data:
+                print(f"[WecomKfAdapter] 获取 access_token 失败 errcode="
+                      f"{data.get('errcode') if isinstance(data, dict) else '?'}", file=sys.stderr)
+                return ""
+            self._access_token = data["access_token"]
+            self._token_expires = now + data.get("expires_in", 7200)
             return self._access_token
-        url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={self.corp_id}&corpsecret={self.kf_secret}"
-        try:
-            data = self._http_get_json(url)
-        except Exception as exc:
-            print(f"[WecomKfAdapter] 获取 access_token 失败: {exc.__class__.__name__}", file=sys.stderr)
-            return ""
-        if "access_token" not in data:
-            print("[WecomKfAdapter] 获取 access_token 失败", file=sys.stderr)
-            return ""
-        self._access_token = data["access_token"]
-        expires_in = data.get("expires_in", 7200)
-        self._token_expires = now + expires_in
-        return self._access_token
+
+    def _invalidate_token_if_needed(self, data: dict) -> None:
+        """API 返回 token 失效类 errcode 时清空缓存，下次强制重取(否则 2 小时内一直用坏 token)。"""
+        if isinstance(data, dict) and data.get("errcode") in _AUTH_ERRCODES:
+            with self._token_lock:
+                self._access_token = ""
+                self._token_expires = 0.0
 
     def _sync_msg(self, token: str, cursor: str) -> list[dict]:
         try:
@@ -133,12 +175,14 @@ class WecomKfAdapter(Adapter):
                     # 出错时不把错误响应当成“无消息”，避免静默丢消息
                     print(f"[WecomKfAdapter] sync_msg 返回错误 errcode={errcode} "
                           f"errmsg={data.get('errmsg', '')}", file=sys.stderr)
+                    self._invalidate_token_if_needed(data)
                     break
                 all_msgs.extend(data.get("msg_list", []))
                 next_cursor = data.get("next_cursor", "")
                 if next_cursor:
                     cursor = next_cursor
                     self._cursor = next_cursor
+                    self._persist_cursor(next_cursor)
                 if not data.get("has_more"):
                     break
             return all_msgs
@@ -158,7 +202,9 @@ class WecomKfAdapter(Adapter):
                 "msgtype": "text",
                 "text": {"content": content},
             }
-            return self._http_post_json(url, payload)
+            data = self._http_post_json(url, payload)
+            self._invalidate_token_if_needed(data)
+            return data
         except Exception as exc:
             print(f"[WecomKfAdapter] send_text 失败: {exc.__class__.__name__}", file=sys.stderr)
             return {}
@@ -167,27 +213,31 @@ class WecomKfAdapter(Adapter):
     # 回调处理(可独立调用,便于离线测试)
     # ------------------------------------------------------------------
 
-    def _handle_post(self, body: str, msg_signature: str, timestamp: str, nonce: str, on_message: OnMessage) -> None:
+    def _handle_post(self, body: str, msg_signature: str, timestamp: str, nonce: str, on_message: OnMessage) -> bool:
         """处理 POST 回调：解密事件 → 拉取消息 → 映射并投递。
 
-        异常已兜底，不向上抛。
+        返回 True 表示处理成功；False 表示解密/参数/拉取失败（调用方据此返回非 200，让腾讯重试，
+        避免消息永久丢失）。单条消息的 on_message 异常会被单独兜住，不影响整体成功判定。
         """
         try:
             event_xml = self._crypt.decrypt_msg(msg_signature, timestamp, nonce, body)
         except Exception as exc:
             print(f"[WecomKfAdapter] 解密失败: {exc.__class__.__name__}", file=sys.stderr)
-            return
+            return False
         token = self._extract_xml_node(event_xml, "Token")
         open_kfid = self._extract_xml_node(event_xml, "OpenKfId")
         if not token or not open_kfid:
             print("[WecomKfAdapter] 事件 XML 缺少 Token 或 OpenKfId", file=sys.stderr)
-            return
+            return False
         try:
             msg_list = self._sync_msg(token, self._cursor)
         except Exception as exc:
             print(f"[WecomKfAdapter] sync_msg 失败: {exc.__class__.__name__}", file=sys.stderr)
-            return
+            return False
         for msg in msg_list:
+            # 只处理客户发来的消息：跳过系统事件(4)与接待人员/机器人自己发的(5)，防自问自答死循环
+            if msg.get("origin") not in (_ORIGIN_CUSTOMER, None):
+                continue
             if msg.get("msgtype") != "text":
                 continue
             text_content = msg.get("text", {}).get("content", "")
@@ -211,6 +261,7 @@ class WecomKfAdapter(Adapter):
                 on_message(message)
             except Exception as exc:
                 print(f"[WecomKfAdapter] on_message 处理失败: {exc.__class__.__name__}", file=sys.stderr)
+        return True
 
     @staticmethod
     def _extract_xml_node(xml_str: str, tag: str) -> str | None:
@@ -237,7 +288,11 @@ class WecomKfAdapter(Adapter):
             print(f"[WecomKfAdapter] 发送消息失败: {exc.__class__.__name__}", file=sys.stderr)
 
     def start(self, on_message: OnMessage) -> None:
-        """启动 HTTP 回调服务器，阻塞入口。"""
+        """启动 HTTP 回调服务器，阻塞入口。
+
+        注：使用单线程 TCPServer 顺序处理回调——Router 的去重/限流非线程安全，
+        单线程可避免竞态；高并发需求应在前置反向代理层解决，而非在此改多线程。
+        """
 
         class _CallbackHandler(BaseHTTPRequestHandler):
             def __init__(self, adapter: "WecomKfAdapter", on_message: OnMessage, *args, **kwargs) -> None:
@@ -262,7 +317,7 @@ class WecomKfAdapter(Adapter):
                 try:
                     plaintext = self._adapter._crypt.verify_url(msg_signature, timestamp, nonce, echostr)
                     self.send_response(200)
-                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
                     self.end_headers()
                     self.wfile.write(plaintext.encode("utf-8"))
                 except Exception:
@@ -274,20 +329,30 @@ class WecomKfAdapter(Adapter):
                 if parsed.path != self._adapter.callback_path:
                     self.send_error(404)
                     return
+                content_length = int(self.headers.get("Content-Length") or 0)
+                if content_length > _MAX_CALLBACK_BODY:
+                    self.send_response(413)
+                    self.end_headers()
+                    return
                 params = parse_qs(parsed.query)
                 msg_signature = params.get("msg_signature", [""])[0]
                 timestamp = params.get("timestamp", [""])[0]
                 nonce = params.get("nonce", [""])[0]
-                content_length = int(self.headers.get("Content-Length") or 0)
-                body = self.rfile.read(content_length).decode("utf-8")
+                body = self.rfile.read(content_length).decode("utf-8", "replace")
                 try:
-                    self._adapter._handle_post(body, msg_signature, timestamp, nonce, self._on_message)
-                except Exception:
-                    pass
-                self.send_response(200)
-                self.send_header("Content-Type", "text/plain")
-                self.end_headers()
-                self.wfile.write(b"success")
+                    ok = self._adapter._handle_post(body, msg_signature, timestamp, nonce, self._on_message)
+                except Exception:  # noqa: BLE001
+                    ok = False
+                if ok:
+                    # 成功：回 success，腾讯不再重试
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.end_headers()
+                    self.wfile.write(b"success")
+                else:
+                    # 处理失败：回 500 让腾讯重试，避免消息永久丢失（cursor 未推进，重试会重新拉取）
+                    self.send_response(500)
+                    self.end_headers()
 
         handler_factory = functools.partial(_CallbackHandler, self, on_message)
         with TCPServer(("", self.callback_port), handler_factory) as httpd:

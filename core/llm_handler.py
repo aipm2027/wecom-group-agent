@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import socket
 import sys
 from typing import Callable
@@ -97,7 +98,7 @@ class LLMHandler(Handler):
         # transport 注入优先（离线测试/自定义后端），短路掉真实网络与 key 校验
         if self._transport is not None:
             result = self._transport(messages)
-            text = result if isinstance(result, str) and result else self._fallback
+            text = result if isinstance(result, str) and result.strip() else self._fallback
         elif not self._api_key:
             print("[LLMHandler] 未配置 LLM_API_KEY，使用兜底话术", file=sys.stderr)
             text = self._fallback
@@ -107,10 +108,14 @@ class LLMHandler(Handler):
         return self._postprocess(text, session)
 
     def _postprocess(self, text: str, session: Session) -> str:
-        """剥离转人工控制标记并在 session 上打"需人工"标记，返回可直接发送的干净文本。"""
+        """剥离转人工控制标记并在 session 上打"需人工"标记，返回可直接发送的干净文本。
+
+        剥离后若为空/纯空白（模型只回了标记或空响应），统一回退兜底话术，避免给客户发空白消息。
+        """
         if text and ESCALATE_TAG in text:
             session.mark_needs_human("agent 判定需人工介入")
-            text = text.replace(ESCALATE_TAG, "").strip()
+            text = text.replace(ESCALATE_TAG, "")
+        text = (text or "").strip()
         return text or self._fallback
 
     def _build_messages(self, system: str, session: Session) -> list[dict]:
@@ -131,7 +136,9 @@ class LLMHandler(Handler):
             if m.sender_id == BOT_SENDER_ID:
                 messages.append({"role": "assistant", "content": content})
             else:
-                messages.append({"role": "user", "content": f"{m.sender_name}：{content}"})
+                # 清洗昵称：压缩空白、去控制字符、限长，避免"昵称注入"混淆角色
+                safe_name = re.sub(r"\s+", " ", (m.sender_name or "")).strip()[:32] or "用户"
+                messages.append({"role": "user", "content": f"{safe_name}：{content}"})
         return messages
 
     def _call_api(self, messages: list[dict]) -> str:

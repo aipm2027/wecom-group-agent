@@ -57,8 +57,9 @@ class Router:
         return last is not None and (now - last) < self.min_interval_sec
 
     def on_message(self, msg: Message) -> None:
-        # 1) 去重（重复推送直接丢）
-        if msg.msg_id and self._is_duplicate(msg.msg_id):
+        # 1) 去重（重复推送直接丢）；msg_id 缺失时用 chat/sender/时间戳/内容合成兜底键，避免去重失效
+        dedup_key = msg.msg_id or f"{msg.chat_id}|{msg.sender_id}|{msg.timestamp}|{msg.content}"
+        if self._is_duplicate(dedup_key):
             return
 
         # 记入会话上下文（无论是否回复，都保留历史）

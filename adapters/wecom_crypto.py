@@ -327,6 +327,8 @@ class WXBizMsgCrypt:
 
     def decrypt_msg(self, msg_signature: str, timestamp: str, nonce: str, post_xml: str) -> str:
         """校验 POST 消息签名并解密,返回明文 XML;失败抛出 WeComCryptError。"""
+        if "<!DOCTYPE" in post_xml or "<!ENTITY" in post_xml:
+            raise WeComCryptError("XML 含 DOCTYPE/ENTITY，拒绝解析（防实体扩展/XML 炸弹）")
         try:
             root = ET.fromstring(post_xml)
             encrypt_node = root.find("Encrypt")
