@@ -10,7 +10,6 @@
 """
 from __future__ import annotations
 
-import functools
 import json
 import os
 import sys
@@ -25,7 +24,7 @@ from urllib.request import Request, urlopen
 
 from core.adapter import Adapter, OnMessage
 from core.message import Message
-from adapters.wecom_crypto import WXBizMsgCrypt, WeComCryptError
+from adapters.wecom_crypto import WXBizMsgCrypt
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -34,6 +33,7 @@ _AUTH_ERRCODES = {40001, 40014, 42001, 41001}
 # 回调只处理客户发来的消息(origin==3)；4=系统事件、5=接待人员/机器人自己发送，必须跳过以防自问自答
 _ORIGIN_CUSTOMER = 3
 _MAX_CALLBACK_BODY = 1024 * 1024  # 回调请求体上限 1MB，超出直接拒绝，防 XML 炸弹/内存耗尽
+_MAX_SYNC_PAGES = 20  # sync_msg 分页拉取的最大兜底页数，防异常 has_more 导致死循环
 
 
 class WecomKfAdapter(Adapter):
@@ -198,7 +198,7 @@ class WecomKfAdapter(Adapter):
             url = f"https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token={access_token}"
             all_msgs: list[dict] = []
             # 分页拉取：has_more=1 时用 next_cursor 继续；最多 20 页兜底防死循环
-            for _ in range(20):
+            for _ in range(_MAX_SYNC_PAGES):
                 payload = {"token": token, "cursor": cursor, "limit": 1000}
                 data = self._http_post_json(url, payload)
                 errcode = data.get("errcode", 0)
@@ -386,7 +386,8 @@ class WecomKfAdapter(Adapter):
                     self.send_response(500)
                     self.end_headers()
 
-        handler_factory = functools.partial(_CallbackHandler, self, on_message)
+        def handler_factory(*args, **kwargs):
+            return _CallbackHandler(self, on_message, *args, **kwargs)
         with TCPServer(("", self.callback_port), handler_factory) as httpd:
             print(
                 f"[WecomKfAdapter] 回调服务器监听 http://0.0.0.0:{self.callback_port}{self.callback_path}",

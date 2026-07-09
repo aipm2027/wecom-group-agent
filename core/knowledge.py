@@ -28,6 +28,16 @@ from abc import ABC, abstractmethod
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# RAG 常驻关键块关键词（命中即无条件纳入结果）与结构化商品状态中文映射；
+# 提到模块级，避免每次检索/格式化时重复创建。
+_RESIDENT_KEYWORDS = ("活动", "主推", "优惠", "促销", "满减", "折扣", "特价", "限时")
+_STATUS_MAP = {"on_sale": "在售", "off_sale": "已下架", "out_of_stock": "已售罄"}
+
+
+def _resolve_path(path: str) -> str:
+    """相对路径按项目根解析，绝对路径原样返回。"""
+    return path if os.path.isabs(path) else os.path.join(_ROOT, path)
+
 
 def _normalize(v: list[float]) -> list[float]:
     """L2 归一化向量（纯 Python）。"""
@@ -62,7 +72,7 @@ class StaticKnowledgeProvider(KnowledgeProvider):
     """全量返回知识文件内容（忽略 query）。当前默认，适合小知识库。"""
 
     def __init__(self, path: str = "prompts/knowledge.md") -> None:
-        self._path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+        self._path = _resolve_path(path)
 
     def retrieve(self, query: str) -> str:
         try:
@@ -93,7 +103,7 @@ class RagKnowledgeProvider(KnowledgeProvider):
                  embed_url: str | None = None,
                  embed_model: str | None = None,
                  api_key: str | None = None) -> None:
-        self._path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+        self._path = _resolve_path(path)
         self._embed_fn = embed_fn
         self._top_k = top_k if top_k is not None else int(os.environ.get("RAG_TOP_K", "4"))
         self._small_kb_max = small_kb_max if small_kb_max is not None else int(os.environ.get("RAG_SMALL_KB_MAX", "15"))
@@ -226,10 +236,9 @@ class RagKnowledgeProvider(KnowledgeProvider):
                     keyword_indices.add(i)
 
         # 常驻关键块通路
-        resident_keywords = ("活动", "主推", "优惠", "促销", "满减", "折扣", "特价", "限时")
         resident_indices: set[int] = set()
         for i, chunk in enumerate(self._chunks):
-            for kw in resident_keywords:
+            for kw in _RESIDENT_KEYWORDS:
                 if kw in chunk:
                     resident_indices.add(i)
                     break
@@ -321,7 +330,7 @@ class StructuredKnowledgeProvider(KnowledgeProvider):
     """结构化商品库：按关键词/属性精确匹配（非向量语义），适合查价/规格/库存。"""
 
     def __init__(self, path: str = "prompts/products.json", products: list[dict] | None = None) -> None:
-        self._path = path if os.path.isabs(path) else os.path.join(_ROOT, path)
+        self._path = _resolve_path(path)
         if products is not None:
             self._products = products
         else:
@@ -364,7 +373,7 @@ class StructuredKnowledgeProvider(KnowledgeProvider):
         if promo:
             lines.append(f"促销：{promo}")
         status = product.get("status", "")
-        status_cn = {"on_sale": "在售", "off_sale": "已下架", "out_of_stock": "已售罄"}.get(status, status)
+        status_cn = _STATUS_MAP.get(status, status)
         if status_cn:
             lines.append(f"状态：{status_cn}")
         return " | ".join(lines)

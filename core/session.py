@@ -8,7 +8,7 @@ from __future__ import annotations
 import threading
 from collections import deque
 from dataclasses import dataclass, field
-from typing import Callable, Deque, Optional
+from typing import Callable, Deque
 
 from .message import Message
 
@@ -24,9 +24,9 @@ class Session:
     needs_human: bool = False       # agent 判定需转人工，待人工认领
     escalation_reason: str = ""      # 转人工原因（agent 或规则填）
     # 写穿透钩子：持久化存储（如 SQLite）挂上后，消息/状态变更自动落库；内存版留 None
-    on_message: Optional[Callable[["Session", Message], None]] = field(
+    on_message: Callable[["Session", Message], None] | None = field(
         default=None, repr=False, compare=False)
-    on_flags: Optional[Callable[["Session"], None]] = field(
+    on_flags: Callable[["Session"], None] | None = field(
         default=None, repr=False, compare=False)
 
     def add(self, msg: Message) -> None:

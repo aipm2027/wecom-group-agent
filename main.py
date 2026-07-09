@@ -64,7 +64,7 @@ def _default_on_escalate(session) -> None:
 
     生产可替换为写工单队列 / 调 webhook 通知工作台（见 docs 06 人工接管章节）。
     """
-    reason = getattr(session, "escalation_reason", "") or getattr(session, "needs_human", "")
+    reason = getattr(session, "escalation_reason", "") or "需人工介入"
     print(f"[escalate] 会话 {session.chat_id} 需人工介入：{reason}", file=sys.stderr)
 
 

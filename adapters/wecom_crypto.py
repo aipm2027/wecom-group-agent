@@ -14,7 +14,6 @@ import hashlib
 import os
 import struct
 import xml.etree.ElementTree as ET
-from typing import Optional
 
 # ---------------------------------------------------------------------------
 # AES-256 纯 Python 实现(FIPS-197 兼容)

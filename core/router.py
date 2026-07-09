@@ -94,7 +94,6 @@ class Router:
             sender_id=BOT_SENDER_ID,
             sender_name="Bot",
             content=reply,
-            msg_type="text",
         ))
 
         # 6) 若本轮 agent 判定需人工，触发升级回调（通知工作台等）
