@@ -90,8 +90,8 @@ def _check(text: str, spec: dict) -> list[str]:
 def _build_llm_reply_fn():
     """在线模式:构造真实 LLMHandler(hybrid 知识,与生产推荐形态一致)。"""
     try:
-        from main import _load_dotenv
-        _load_dotenv()
+        from main import load_env_file
+        load_env_file()
     except Exception:
         pass
     if not os.environ.get("LLM_API_KEY"):
