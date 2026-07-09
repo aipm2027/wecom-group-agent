@@ -22,7 +22,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Syntax check (全量 py_compile)
-        run: python -m compileall -q main.py api_server.py core adapters tests examples
+        run: python -m compileall -q main.py api_server.py core adapters tests examples evals
 
       - name: Import smoke (入口模块可导入)
         run: python -c "import main, api_server; main.build_knowledge()"
@@ -33,3 +33,19 @@ jobs:
             echo "== $f =="
             python "$f" || exit 1
           done
+
+      - name: Offline evals (知识检索金标评测,无网络)
+        run: python evals/run_evals.py
+
+  docker:
+    # 镜像可构建性验证(纯 stdlib 项目,build 即产物;真机联调前不 push registry)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image
+        run: docker build -t wecom-group-agent:ci .
+
+      - name: Container import smoke
+        run: docker run --rm wecom-group-agent:ci python3 -c "import main, api_server; main.build_knowledge(); print('容器内 import 冒烟 OK')"

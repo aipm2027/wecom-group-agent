@@ -1,0 +1,50 @@
+# 生产双服务:agent(微信客服接入)+ api(运营 REST API)。
+#
+#   cp .env.example .env && 填好密钥
+#   docker compose up -d
+#   docker compose logs -f agent
+#
+# 两个服务共享 agent-data 卷:STORE=sqlite 同库(WAL 已开,双进程安全)、
+# WECOM_TOKEN_FILE 共享 access_token(见 adapters/wecom_kf.py 跨进程共享)。
+services:
+  agent:
+    build: .
+    image: wecom-group-agent
+    command: python3 main.py
+    env_file: .env
+    environment:            # 生产形态固化(覆盖 .env 中同名项)
+      ADAPTER: kf
+      HANDLER: llm
+      STORE: sqlite
+      SQLITE_PATH: /app/data/sessions.db
+      WECOM_TOKEN_FILE: /app/data/wecom_kf_token.json
+    ports:
+      - "9000:9000"          # 微信客服回调,需公网可达(前面通常还有 nginx/网关)
+    volumes:
+      - agent-data:/app/data
+    restart: unless-stopped
+    stop_grace_period: 15s   # main.py 已处理 SIGTERM 优雅退出
+
+  api:
+    build: .
+    image: wecom-group-agent
+    command: python3 api_server.py
+    env_file: .env
+    environment:
+      STORE: sqlite
+      SQLITE_PATH: /app/data/sessions.db
+      API_HOST: 0.0.0.0      # 容器内必须 0.0.0.0 才能被端口映射到宿主机
+      API_PORT: "8080"
+    ports:
+      - "127.0.0.1:8080:8080"  # 只绑宿主机回环:运营 API 不直接暴露公网,走 SSH 隧道或反代加鉴权
+    volumes:
+      - agent-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  agent-data:

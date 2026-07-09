@@ -1,0 +1,17 @@
+# Dockerfile 已用显式 COPY 白名单;此文件是第二道保险(防有人改回 COPY . )
+.git
+.github
+.env
+.env.*
+!.env.example
+__pycache__
+*.pyc
+data
+docs
+tests
+evals
+TASKS.md
+DISCUSSION.md
+docker-compose.yml
+Dockerfile
+Makefile

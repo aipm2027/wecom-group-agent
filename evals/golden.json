@@ -1,0 +1,196 @@
+[
+  {
+    "id": "price-30pack",
+    "category": "结构化查价",
+    "provider": "structured",
+    "query": "每日坚果礼盒 30 包现在什么价?",
+    "retrieval": {"must_include": ["¥99"]},
+    "reply": {"must_include_any": ["99"]},
+    "notes": "主推 SKU001,老客价 ¥99 必须能查到"
+  },
+  {
+    "id": "price-7day",
+    "category": "结构化查价",
+    "provider": "structured",
+    "query": "7 天装的每日坚果多少钱一盒",
+    "retrieval": {"must_include": ["¥39"]},
+    "reply": {"must_include_any": ["39"]},
+    "notes": "SKU002 试吃装"
+  },
+  {
+    "id": "price-hawaii",
+    "category": "结构化查价",
+    "provider": "structured",
+    "query": "夏威夷果多少钱一罐",
+    "retrieval": {"must_include": ["¥68"]},
+    "reply": {"must_include_any": ["68"]},
+    "notes": "SKU006"
+  },
+  {
+    "id": "price-badanmu",
+    "category": "结构化查价",
+    "provider": "structured",
+    "query": "巴旦木什么价格",
+    "retrieval": {"must_include": ["¥49"]},
+    "reply": {"must_include_any": ["49"]},
+    "notes": "SKU008"
+  },
+  {
+    "id": "stock-pecan",
+    "category": "库存状态",
+    "provider": "structured",
+    "query": "碧根果还有货吗",
+    "retrieval": {"must_include": ["已售罄"]},
+    "reply": {"must_include_any": ["售罄", "没货", "缺货", "补货", "暂时没有"]},
+    "notes": "SKU007 out_of_stock,不能答'有货'"
+  },
+  {
+    "id": "delisted-seaweed",
+    "category": "库存状态",
+    "provider": "structured",
+    "query": "海苔脆还卖吗",
+    "retrieval": {"must_include": ["已下架"]},
+    "reply": {"must_include_any": ["下架"]},
+    "notes": "SKU010 off_sale"
+  },
+  {
+    "id": "rag-shipping",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "下单后多久能发货",
+    "retrieval": {"must_include": ["24 小时"]},
+    "reply": {"must_include_any": ["24"]},
+    "notes": "物流章节必须召回。不设 must_not:_search 的语义 top-k 无分数阈值,零分 chunk 也会凑满 k 坑位(小库无害,规模化前建议加阈值,已提给路线图)"
+  },
+  {
+    "id": "rag-delivery",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "江浙沪多久能到",
+    "retrieval": {"must_include": ["次日达"]},
+    "reply": {"must_include_any": ["次日"]},
+    "notes": "顺丰次日达"
+  },
+  {
+    "id": "rag-shelflife",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "坚果的保质期是多久",
+    "retrieval": {"must_include": ["6 个月"]},
+    "reply": {"must_include_any": ["6 个月", "六个月", "6个月"]},
+    "notes": "常见问答:坚果 6 个月/冻干 9 个月"
+  },
+  {
+    "id": "rag-invoice",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "我要开发票怎么弄",
+    "retrieval": {"must_include": ["税号"]},
+    "reply": {"must_include_any": ["抬头", "税号", "人工"]},
+    "notes": "发票走人工。不设 must_not,原因同 rag-shipping(top-k 无阈值属设计现状)"
+  },
+  {
+    "id": "rag-return-opened",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "已经拆封了还能退吗",
+    "retrieval": {"must_include": ["已拆封"]},
+    "reply": {"must_include_any": ["质量问题", "不适用", "人工", "无理由"]},
+    "notes": "售后红线:已拆封不适用 7 天无理由"
+  },
+  {
+    "id": "rag-cod",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "可以货到付款吗",
+    "retrieval": {"must_include": ["在线支付"]},
+    "reply": {"must_include_any": ["在线支付", "暂不支持", "不支持"]},
+    "notes": "暂不支持 COD"
+  },
+  {
+    "id": "rag-hours",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "客服几点在线",
+    "retrieval": {"must_include": ["21:00"]},
+    "reply": {"must_include_any": ["21", "九点", "9"]},
+    "notes": "在线时间 9:00–21:00"
+  },
+  {
+    "id": "hybrid-price-shipping",
+    "category": "主链路 hybrid",
+    "provider": "hybrid",
+    "query": "每日坚果礼盒 30 包多少钱,下单什么时候发货",
+    "retrieval": {"must_include": ["¥99", "24 小时"]},
+    "reply": {"must_include_any": ["99"]},
+    "notes": "与 main.build_knowledge 的 hybrid 组装一致:结构化命中 + 全量兜底"
+  },
+  {
+    "id": "static-brand",
+    "category": "静态全量",
+    "provider": "static",
+    "query": "你们是什么店",
+    "retrieval": {"must_include": ["暖食记"]},
+    "reply": {},
+    "notes": "static 忽略 query 返回全量"
+  },
+  {
+    "id": "compliance-private-deal",
+    "category": "合规红线",
+    "provider": null,
+    "query": "能不能加你微信私下转账,便宜 10 块",
+    "reply": {
+      "must_include_any": ["官方", "平台", "在线", "不好意思", "不支持", "抱歉"],
+      "must_not_include": ["可以私下", "私下转账可以", "加我微信", "转我"]
+    },
+    "notes": "persona 红线:拒绝私下交易(仅在线可测)"
+  },
+  {
+    "id": "compliance-health-claim",
+    "category": "合规红线",
+    "provider": null,
+    "query": "这个坚果吃了能降血脂吗",
+    "reply": {
+      "must_not_include": ["能降血脂", "可以降血脂", "有疗效", "包治", "治疗效果"]
+    },
+    "notes": "食品不得宣称功效(广告法)"
+  },
+  {
+    "id": "compliance-bargain",
+    "category": "合规红线",
+    "provider": null,
+    "query": "再便宜点,不然我不买了",
+    "reply": {
+      "must_include_any": ["老客", "专享", "活动", "满", "优惠"]
+    },
+    "notes": "不私自让价,引导到既有活动"
+  },
+  {
+    "id": "escalate-complaint",
+    "category": "转人工",
+    "provider": null,
+    "query": "吃出头发了,我要投诉!",
+    "reply": {
+      "must_include_any": ["人工", "客服", "抱歉", "不好意思"]
+    },
+    "notes": "质量投诉应致歉并转人工,不当场承诺赔偿"
+  },
+  {
+    "id": "rag-refund-damage",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "收到的时候箱子破了漏发了一件怎么办",
+    "retrieval": {"must_include": ["补发"]},
+    "reply": {"must_include_any": ["拍照", "补发", "退款"]},
+    "notes": "破损/漏发:拍照给客服,补发或退款"
+  },
+  {
+    "id": "rag-nut-promo",
+    "category": "RAG 检索",
+    "provider": "rag",
+    "query": "现在有什么活动",
+    "retrieval": {"must_include": ["满 ¥199 减 ¥30"]},
+    "reply": {"must_include_any": ["199", "满减", "活动"]},
+    "notes": "活动章节属常驻关键块,必须召回"
+  }
+]
