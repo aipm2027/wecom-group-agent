@@ -72,6 +72,28 @@ for f in tests/test_*.py; do python3 "$f"; done
 
 配置项见 [.env.example](.env.example)。当前 LLM 用 StepFun（阶跃星辰，OpenAI 兼容），换模型/换 Claude 只改 `LLM_BASE_URL`/`LLM_MODEL`。
 
+> **启动自检**：关键配置缺失/拼写错误会在启动时列出全部问题（含中文修复指引）并拒绝启动（退出码 2），不会静默降级——漏配 `LLM_API_KEY` 不会再"看起来在跑，实际是兜底复读机"。
+
+## 生产部署（Docker 三服务）
+
+```bash
+cp .env.example .env      # 填 LLM_API_KEY + WECOM_*（获取方法见联调 SOP）
+docker compose up -d      # agent(9000 公网回调) + api(8080 仅回环) + console(8090 仅回环)
+docker compose ps         # 期望三服务 Up，api 带 healthcheck
+docker compose logs -f agent   # 看回调/自检日志
+```
+
+- 微信客服回调需公网 **https**：反代（Caddy 两行配置）或内网穿透，逐步操作、故障速查、验收清单见 **[07-真机联调 SOP](docs/技术文档/07-真机联调SOP.md)**。
+- 运营 API 与工作台只绑回环，不直接暴露公网；远程访问走 SSH 隧道：`ssh -L 8090:127.0.0.1:8090 服务器` 后本地打开 `http://127.0.0.1:8090`。
+
+## 运营者 5 分钟上手（Web 工作台）
+
+1. 打开 `http://127.0.0.1:8090`，输入口令（`CONSOLE_PASSWORD`）登录；
+2. 左侧「**待人工**」标签有角标 = AI 兜不住的会话，点开可见转人工原因；
+3. 点「**人工接管**」→ AI 立即静默，下方输入框直接回复客户（Ctrl/⌘+Enter 发送）；
+4. 处理完点「**交回 AI**」，AI 恢复自动回复；
+5. 右上「**🧪 试聊调试**」随时测试 AI 回复效果（不入库、不下发、不影响真实会话）。
+
 ## 文档
 
 | 文档 | 内容 |

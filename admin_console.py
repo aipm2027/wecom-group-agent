@@ -220,6 +220,13 @@ main{flex:1;display:flex;min-height:0}
 #pv button{padding:7px 18px;border-radius:6px;border:1px solid #d9d9d9;background:#fff;cursor:pointer;font-size:13px}
 #pv button.primary{background:#07c160;border-color:#07c160;color:#fff}
 .toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:8px 18px;border-radius:6px;font-size:13px;opacity:.94;z-index:99}
+@media (max-width:700px){ /* 手机竖屏:上下布局,列表收窄为顶部抽屉 */
+ main{flex-direction:column}
+ #left{width:100%;height:38%;border-right:none;border-bottom:1px solid #e5e5e5}
+ #right{height:62%}
+ .bubble{max-width:82%}
+ header h1{font-size:14px}#metrics{display:none}
+}
 </style></head><body>
 <header><h1>🛍️ 私域客服工作台</h1><span id="metrics">加载中…</span>
 <button onclick="openPreview()">🧪 试聊调试</button><button onclick="logout()">退出</button></header>
