@@ -30,7 +30,7 @@ wecom-group-agent/
 │   ├── persona.md       #   私域导购人设
 │   ├── knowledge.md     #   店铺/产品/FAQ（样例，待替换）
 │   └── products.json    #   结构化商品库样例（structured/hybrid 用）
-├── tests/               # 离线测试（10 套，全绿）
+├── tests/               # 离线测试（12 套，全绿）
 ├── examples/            # 样例与评测（sample.json / demo_agent.py）
 ├── docs/                # 文档（需求/技术/测试三大块，见下）
 ├── .github/workflows/   # GitHub Actions CI（多版本跑全部离线测试）
@@ -61,7 +61,7 @@ ADAPTER=kf HANDLER=llm python3 main.py
 # 6) 运营后台 REST API（会话/接管/试聊/指标）
 ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 
-# 7) 全部离线测试（10 套）
+# 7) 全部离线测试（12 套）
 for f in tests/test_*.py; do python3 "$f"; done
 ```
 

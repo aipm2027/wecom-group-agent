@@ -271,6 +271,7 @@
 - Token 匹配使用 `hmac.compare_digest` 做恒定时间比较，防止时序攻击。
 - Token 不匹配时返回 `401 Unauthorized`。
 - 请求体上限 1MB（超返 `413 Payload Too Large`），防超大 Content-Length 耗内存。
+- 进程收到 `SIGTERM`/`SIGINT` 时调用 `server.shutdown()` 优雅停止（先停接新请求再退出），适配容器/systemd。
 - 规划后续可扩展为 RBAC（区分运营/管理员/只读）。
 
 ### 4.2 会话管理
@@ -278,7 +279,7 @@
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
 | `GET` | `/api/health` | 健康检查 | **免鉴权。** 返回 `{"ok":True}` |
-| `GET` | `/api/conversations` | 会话列表 | 返回全部会话的 `chat_id`、`human_controlled`、`needs_human`、`escalation_reason`、`message_count`、`last_message` 等摘要 |
+| `GET` | `/api/conversations` | 会话列表 | 返回会话摘要（`chat_id`、`human_controlled`、`needs_human`、`escalation_reason`、`message_count`、`last_message` 等）；支持 `?limit=N` 限制返回条数（分页钩子） |
 | `GET` | `/api/conversations/{id}/messages` | 会话消息流 | 按时间正序返回消息列表（含 `is_bot`、`is_human_agent` 标记） |
 | `POST` | `/api/conversations/{id}/messages` | 人工发消息 | `{"text":"...","sender_name":"人工客服"}`；通过已装配的 adapter 发送，记入 session；返回 `{"ok":True,"sent":true/false}` |
 | `POST` | `/api/conversations/{id}/takeover` | 人工接管 | 设置 `human_controlled=True`，agent 静默 |
