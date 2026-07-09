@@ -240,6 +240,63 @@ def test_cache_rebuild_on_change() -> None:
         os.unlink(provider._path)
 
 
+def test_disk_cache_http_path() -> None:
+    """HTTP embedding 路径的磁盘缓存：首次写盘，二次(新实例)命中缓存不再重新 embed chunks。
+
+    此前所有 RAG 测试都注入 embed_fn，导致真实 HTTP + 磁盘缓存路径完全未测。此处 monkeypatch
+    core.knowledge.urlopen 走 embed_fn=None 的 HTTP 分支，验证磁盘缓存读写。
+    """
+    import json
+    import shutil
+
+    import core.knowledge as K
+
+    calls = {"chunk_batches": 0}
+
+    def fake_urlopen(req, timeout=None):
+        payload = json.loads(req.data.decode("utf-8"))
+        texts = payload["input"]
+        if len(texts) > 1:
+            calls["chunk_batches"] += 1  # 批量 embed chunks（query 单条不计）
+        data = {"data": [{"index": i, "embedding": _fake_embedder([t])[0]} for i, t in enumerate(texts)]}
+
+        class _Resp:
+            def __enter__(self_inner):
+                return self_inner
+
+            def __exit__(self_inner, *a):
+                return False
+
+            def read(self_inner):
+                return json.dumps(data).encode("utf-8")
+
+        return _Resp()
+
+    old_urlopen = K.urlopen
+    K.urlopen = fake_urlopen
+    cache_dir = tempfile.mkdtemp()
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".md", encoding="utf-8", delete=False) as f:
+        f.write(_SYNTHETIC_KB)
+        path = f.name
+    try:
+        p1 = RagKnowledgeProvider(path=path, embed_fn=None, small_kb_max=15, top_k=4, api_key="fake")
+        p1._cache_dir = cache_dir
+        r1 = p1.retrieve("每日坚果礼盒多少钱")
+        assert "每日坚果礼盒 30 包：¥99" in r1, "HTTP 路径检索应命中相关商品"
+        assert calls["chunk_batches"] == 1, "首次应批量 embed chunks 一次"
+        assert os.listdir(cache_dir), "首次应写入磁盘缓存文件"
+
+        calls["chunk_batches"] = 0
+        p2 = RagKnowledgeProvider(path=path, embed_fn=None, small_kb_max=15, top_k=4, api_key="fake")
+        p2._cache_dir = cache_dir
+        p2.retrieve("腰果多少钱")
+        assert calls["chunk_batches"] == 0, "二次(新实例)应命中磁盘缓存，不重新 embed chunks"
+    finally:
+        K.urlopen = old_urlopen
+        os.unlink(path)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
 def main() -> None:
     for fn in (
         test_small_kb_bypass,
@@ -250,6 +307,7 @@ def main() -> None:
         test_error_fallback,
         test_no_key_fallback,
         test_cache_rebuild_on_change,
+        test_disk_cache_http_path,
     ):
         fn()
         print(f"通过: {fn.__name__}")

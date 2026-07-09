@@ -18,9 +18,10 @@ def test_static_returns_file_content() -> None:
 
 
 def test_rag_provider_exists() -> None:
-    """RagKnowledgeProvider 已实现，可正常实例化，不再抛 NotImplementedError。"""
+    """RagKnowledgeProvider 已实现：可实例化，retrieve 返回 str 且绝不抛异常（无 key 时降级为全量/空）。"""
     kp = RagKnowledgeProvider()
-    assert kp is not None
+    result = kp.retrieve("每日坚果")
+    assert isinstance(result, str), "retrieve 应返回字符串（无 embedding key 时降级，不崩）"
 
 
 def test_provider_is_pluggable() -> None:

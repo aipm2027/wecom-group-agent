@@ -182,6 +182,7 @@ def test_adapter_post() -> None:
         kf_secret="fake_secret",
         callback_token=_TOKEN,
         encoding_aes_key=_ENCODING_AES_KEY,
+        cursor_path=os.devnull,
         http_get_json=fake_http_get_json,
         http_post_json=fake_http_post_json,
     )
@@ -328,6 +329,83 @@ def test_decrypt_bad_length() -> None:
         pass
 
 
+def test_origin_filter_skips_bot_messages() -> None:
+    """sync_msg 返回接待人员/机器人自己发的消息(origin=5)应被跳过，防自问自答循环。"""
+    crypt = WXBizMsgCrypt(_TOKEN, _ENCODING_AES_KEY, _RECEIVEID)
+    event_xml = "<xml><Token><![CDATA[tk]]></Token><OpenKfId><![CDATA[kf001]]></OpenKfId></xml>"
+    enc = crypt.encrypt_msg(event_xml, "n", "1")
+    root = ET.fromstring(enc)
+    encrypt = root.find("Encrypt").text
+    sig = root.find("MsgSignature").text
+    ts = root.find("TimeStamp").text
+    nonce = root.find("Nonce").text
+    post = f"<xml><Encrypt><![CDATA[{encrypt}]]></Encrypt></xml>"
+
+    def get_ok(u: str) -> dict:
+        return {"access_token": "t", "expires_in": 7200}
+
+    def post_sync(u: str, p: dict) -> dict:
+        return {"msg_list": [
+            {"msgid": "m-user", "origin": 3, "open_kfid": "kf001", "external_userid": "u1",
+             "msgtype": "text", "text": {"content": "你好"}},
+            {"msgid": "m-bot", "origin": 5, "open_kfid": "kf001", "external_userid": "u1",
+             "msgtype": "text", "text": {"content": "机器人自己发的"}},
+        ]}
+
+    adapter = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                             encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull,
+                             http_get_json=get_ok, http_post_json=post_sync)
+    got: list = []
+    ok = adapter._handle_post(post, sig, ts, nonce, lambda m: got.append(m))
+    assert ok is True, "_handle_post 成功应返回 True"
+    assert len(got) == 1 and got[0].content == "你好", "只应投递 origin=3 客户消息，跳过 origin=5 的 bot 消息"
+
+
+def test_handle_post_returns_false_on_decrypt_fail() -> None:
+    """解密失败时 _handle_post 返回 False（调用方据此回非 200 让腾讯重试，避免消息永久丢失）。"""
+    adapter = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                             encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull,
+                             http_get_json=lambda u: {}, http_post_json=lambda u, p: {})
+    ok = adapter._handle_post("<xml><Encrypt><![CDATA[bad]]></Encrypt></xml>", "sig", "ts", "n", lambda m: None)
+    assert ok is False
+
+
+def test_access_token_cached() -> None:
+    """access_token 命中缓存：连续两次只应请求一次 gettoken。"""
+    calls = {"n": 0}
+
+    def get_token(u: str) -> dict:
+        if "gettoken" in u:
+            calls["n"] += 1
+        return {"access_token": "t", "expires_in": 7200}
+
+    adapter = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                             encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull,
+                             http_get_json=get_token, http_post_json=lambda u, p: {})
+    assert adapter._get_access_token() == "t"
+    assert adapter._get_access_token() == "t"
+    assert calls["n"] == 1, "第二次应命中缓存，不再请求 gettoken"
+
+
+def test_access_token_invalidated_on_errcode() -> None:
+    """sync_msg 返回 errcode=40001(token 失效)后应清空缓存，下次强制重取，而非 2 小时内复用坏 token。"""
+    calls = {"n": 0}
+
+    def get_token(u: str) -> dict:
+        calls["n"] += 1
+        return {"access_token": f"t{calls['n']}", "expires_in": 7200}
+
+    def post_expired(u: str, p: dict) -> dict:
+        return {"errcode": 40001, "errmsg": "invalid access_token"}
+
+    adapter = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                             encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull,
+                             http_get_json=get_token, http_post_json=post_expired)
+    adapter._sync_msg("tk", "")   # gettoken(1) + sync 返回 40001 → 清缓存
+    adapter._sync_msg("tk", "")   # 缓存已清 → 重新 gettoken(2)
+    assert calls["n"] == 2, "token 失效后应强制重取"
+
+
 def main() -> None:
     for fn in (
         test_encoding_aes_key_valid,
@@ -342,6 +420,10 @@ def main() -> None:
         test_sync_msg_errcode,
         test_missing_aes_key_friendly_error,
         test_decrypt_bad_length,
+        test_origin_filter_skips_bot_messages,
+        test_handle_post_returns_false_on_decrypt_fail,
+        test_access_token_cached,
+        test_access_token_invalidated_on_errcode,
     ):
         fn()
         print(f"通过: {fn.__name__}")

@@ -102,6 +102,15 @@ def test_injection_stays_user_role() -> None:
     assert "坏人：" in msgs[1]["content"], "注入内容应带昵称前缀作为普通 user 输入"
 
 
+def test_blank_reply_falls_back() -> None:
+    """transport 返回纯空格时，reply 应回退兜底话术，而不是给客户发一条空白消息。"""
+    handler = LLMHandler(transport=lambda m: "   ")
+    session = Session(chat_id="t")
+    session.add(_msg("t", "u1", "张三", "你好", "m1"))
+    result = handler.reply(session.history[-1], session)
+    assert result == "不好意思，我这边有点忙，稍后回复你哈~", "纯空格回复应回退兜底话术"
+
+
 def main() -> None:
     for fn in (
         test_transport_builds_messages,
@@ -109,6 +118,7 @@ def main() -> None:
         test_max_history_limit,
         test_empty_content_skipped_and_truncated,
         test_injection_stays_user_role,
+        test_blank_reply_falls_back,
     ):
         fn()
         print(f"通过: {fn.__name__}")
