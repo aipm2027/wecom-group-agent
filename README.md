@@ -26,11 +26,12 @@ wecom-group-agent/
 │   ├── wecom_kf.py      #   微信客服适配器（官方合规 1:1，已实现）
 │   └── wecom_crypto.py  #   企微回调加解密（纯 Python AES-256 / WXBizMsgCrypt）
 ├── api_server.py        # REST API 层（运营后台，stdlib http.server）
+├── admin_console.py     # 运营管理后台 Web 工作台（零依赖单文件，反代 api_server）
 ├── prompts/             # 人设 + 知识资产（可编辑）
 │   ├── persona.md       #   私域导购人设
 │   ├── knowledge.md     #   店铺/产品/FAQ（样例，待替换）
 │   └── products.json    #   结构化商品库样例（structured/hybrid 用）
-├── tests/               # 离线测试（12 套，全绿）
+├── tests/               # 离线测试（13 套，全绿）
 ├── examples/            # 样例与评测（sample.json / demo_agent.py）
 ├── docs/                # 文档（需求/技术/测试三大块，见下）
 ├── .github/workflows/   # GitHub Actions CI（多版本跑全部离线测试）
@@ -61,7 +62,11 @@ ADAPTER=kf HANDLER=llm python3 main.py
 # 6) 运营后台 REST API（会话/接管/试聊/指标）
 ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 
-# 7) 全部离线测试（12 套）
+# 7) 运营管理后台 Web 工作台（浏览器操作：收件箱/接管/人工回复/试聊）
+ADMIN_TOKEN=xxx CONSOLE_PASSWORD=yyy python3 admin_console.py
+#    打开 http://127.0.0.1:8090 ，口令登录（需先起 6) 的 API）
+
+# 8) 全部离线测试（13 套）
 for f in tests/test_*.py; do python3 "$f"; done
 ```
 
@@ -88,5 +93,6 @@ for f in tests/test_*.py; do python3 "$f"; done
 - ✅ 可插拔知识模块：Static / RAG（混合检索）/ 结构化商品库 / Hybrid，`KNOWLEDGE_PROVIDER` 一键切换
 - ✅ 人工接管：转人工信号 + 接管静默 + REST API（`/api/queue`、takeover/release）
 - ✅ SQLite 持久化（`STORE=sqlite`，重启恢复）+ REST API 运营后台 + GitHub Actions CI（Py 3.9–3.12）
+- ✅ 运营管理后台 Web 工作台（`admin_console.py`：收件箱/接管/人工回复/试聊调试，零依赖单文件）
 - ✅ 微信客服适配器（官方合规 1:1，纯 Python AES-256 回调加解密）——代码就绪，真机公网回调联调待验证
 - ⏳ 真实企微群 hook（`ntwork`）——待 Windows 环境实机
