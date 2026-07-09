@@ -54,6 +54,8 @@ python3 tests/test_rag_offline.py
 
 > **CONV-B 全量文档同步（已完成，`eeb36cb`）** — `docs/需求文档/`（00–05）、`docs/技术文档/`（00–06）、README（+ `docs/测试文档/03` 一处过时行）已同步至 T1–T6 落地现状；消除过时"未实现/规划/NotImplemented"标注（ntwork/工单前端/指标表等真规划项保留）；0 死链、全量 10 个测试仍全绿。CONV-A 可正常继续改这两个目录。
 
+> **CONV-B 深度审核修复（生产就绪加固）** — 6 视角深审 + 对抗验证后修复:微信客服适配器健壮性(回调失败回 500 让腾讯重试防丢消息、access_token 加锁+失效清缓存、只处理 origin=3 客户消息防自问自答、cursor 持久化、body 上限、XML 炸弹防护)、SQLite 开 WAL(双进程并发)、LLM 空回复兜底 + sender_name 清洗、Router 空 msg_id 去重;补测试盲区(新增 test_router/test_main + kf/rag 缓存/空回复,共 12 套全绿);persona 加合规红线/禁止承诺/拒私下交易/不贬竞品、收窄转人工、knowledge 售后边界澄清 + 与 products.json 对齐、demo 加 4 个合规对抗场景;CI 加全量 py_compile + import 冒烟。
+
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
 - 密钥只进 `.env`（已 gitignore），**绝不提交**；日志不打印 key。
