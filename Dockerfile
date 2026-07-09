@@ -18,7 +18,7 @@ COPY core/ core/
 COPY adapters/ adapters/
 COPY prompts/ prompts/
 COPY examples/ examples/
-COPY main.py api_server.py ./
+COPY main.py api_server.py admin_console.py ./
 
 # data/ 是运行时可写目录(sqlite 会话库、KF token 共享文件、RAG 索引缓存),
 # 生产用卷挂载覆盖;这里预建并授权给非 root 用户。
@@ -27,8 +27,8 @@ RUN useradd --create-home --uid 10001 agent \
     && chown -R agent:agent /app
 USER agent
 
-# 9000 = 微信客服回调(ADAPTER=kf,监听 0.0.0.0);8080 = 运营 REST API
-EXPOSE 9000 8080
+# 9000 = 微信客服回调(ADAPTER=kf,监听 0.0.0.0);8080 = 运营 REST API;8090 = Web 工作台
+EXPOSE 9000 8080 8090
 
 # 默认跑 agent 主进程;api 服务在 compose 里用 command 覆盖
 CMD ["python3", "main.py"]

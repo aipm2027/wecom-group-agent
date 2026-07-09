@@ -46,5 +46,20 @@ services:
       timeout: 5s
       retries: 3
 
+  console:
+    build: .
+    image: wecom-group-agent
+    command: python3 admin_console.py
+    env_file: .env             # 用到 ADMIN_TOKEN(服务端注入)与 CONSOLE_PASSWORD
+    environment:
+      API_BASE: http://api:8080   # 走 compose 内网直达 api 服务
+      CONSOLE_HOST: 0.0.0.0
+      CONSOLE_PORT: "8090"
+    ports:
+      - "127.0.0.1:8090:8090"  # 与 api 同策略:只绑回环,运营者走 SSH 隧道/反代访问
+    depends_on:
+      - api
+    restart: unless-stopped
+
 volumes:
   agent-data:
