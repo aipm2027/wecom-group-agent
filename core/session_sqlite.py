@@ -69,13 +69,14 @@ class SqliteSessionStore:
             self._live[chat_id] = session
             return session
 
-    def all(self) -> list[Session]:
+    def all(self, limit: int | None = None) -> list[Session]:
         with self._lock:
             rows = self._conn.execute("SELECT chat_id FROM sessions ORDER BY updated_at DESC").fetchall()
             for (chat_id,) in rows:
                 if chat_id not in self._live:
                     self._live[chat_id] = self._hydrate(chat_id)
-            return list(self._live.values())
+            vals = list(self._live.values())
+        return vals[:limit] if limit else vals
 
     def close(self) -> None:
         with self._lock:

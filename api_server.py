@@ -24,7 +24,7 @@ import json
 import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -58,15 +58,18 @@ class ApiApp:
 
     # --- 主入口：返回 (status, dict) ---
     def handle(self, method: str, path: str, body: bytes, headers: dict) -> tuple[int, dict]:
-        path = urlparse(path).path
+        parsed = urlparse(path)
+        path = parsed.path
         if path == "/api/health":
             return 200, {"ok": True}
         if not self._authed(headers):
             return 401, {"error": "unauthorized"}
         try:
+            query = parse_qs(parsed.query)
             parts = [p for p in path.split("/") if p]  # ["api","conversations","u1","messages"]
             if path == "/api/conversations" and method == "GET":
-                return 200, {"conversations": [self._conv_summary(s) for s in self.sessions.all()]}
+                return 200, {"conversations": [self._conv_summary(s)
+                                               for s in self.sessions.all(limit=self._q_int(query, "limit"))]}
             if len(parts) == 4 and parts[0] == "api" and parts[1] == "conversations":
                 chat_id = unquote(parts[2])
                 action = parts[3]
@@ -172,6 +175,15 @@ class ApiApp:
         }
 
     @staticmethod
+    def _q_int(query: dict, key: str) -> int | None:
+        """从 query dict 取整数参数（如 ?limit=200）；无/非法返回 None。"""
+        try:
+            v = query.get(key, [None])[0]
+            return int(v) if v is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _json(body: bytes) -> dict:
         if not body:
             return {}
@@ -241,12 +253,25 @@ def build_app() -> ApiApp:
 
 
 def main() -> None:
+    import signal
     app = build_app()
     host = os.environ.get("API_HOST", "127.0.0.1")
     port = int(os.environ.get("API_PORT", "8080"))
     server = ThreadingHTTPServer((host, port), _make_handler(app))
+
+    def _term(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, _term)
+    except (ValueError, OSError):
+        pass
     print(f"[api] 监听 http://{host}:{port}", file=sys.stderr)
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("[api] 收到终止信号，正在关闭...", file=sys.stderr)
+    finally:
+        server.server_close()
 
 
 if __name__ == "__main__":

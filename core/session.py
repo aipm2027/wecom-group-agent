@@ -73,7 +73,8 @@ class SessionStore:
                 self._sessions[chat_id] = s
             return s
 
-    def all(self) -> list[Session]:
-        """返回所有会话（供管理后台/API 列会话用）。"""
+    def all(self, limit: int | None = None) -> list[Session]:
+        """返回会话列表（供管理后台/API 列会话用）；limit 限制条数（分页钩子，默认全部）。"""
         with self._lock:
-            return list(self._sessions.values())
+            vals = list(self._sessions.values())
+        return vals[:limit] if limit else vals

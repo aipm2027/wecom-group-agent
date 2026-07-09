@@ -406,6 +406,31 @@ def test_access_token_invalidated_on_errcode() -> None:
     assert calls["n"] == 2, "token 失效后应强制重取"
 
 
+def test_token_shared_across_instances() -> None:
+    """配置 token_path 后，两个适配器实例经文件共享 access_token：第二个不再重新 gettoken。"""
+    import tempfile
+    tf = tempfile.mktemp(suffix=".json")
+    calls = {"n": 0}
+
+    def get_token(u: str) -> dict:
+        calls["n"] += 1
+        return {"access_token": "shared-t", "expires_in": 7200}
+
+    try:
+        a1 = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                            encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull, token_path=tf,
+                            http_get_json=get_token, http_post_json=lambda u, p: {})
+        assert a1._get_access_token() == "shared-t"   # 写入共享文件
+        a2 = WecomKfAdapter(corp_id=_RECEIVEID, kf_secret="s", callback_token=_TOKEN,
+                            encoding_aes_key=_ENCODING_AES_KEY, cursor_path=os.devnull, token_path=tf,
+                            http_get_json=get_token, http_post_json=lambda u, p: {})
+        assert a2._get_access_token() == "shared-t"   # 读共享文件，不再请求
+        assert calls["n"] == 1, "第二个实例应复用文件中的 token，不再请求 gettoken"
+    finally:
+        if os.path.exists(tf):
+            os.unlink(tf)
+
+
 def main() -> None:
     for fn in (
         test_encoding_aes_key_valid,
@@ -424,6 +449,7 @@ def main() -> None:
         test_handle_post_returns_false_on_decrypt_fail,
         test_access_token_cached,
         test_access_token_invalidated_on_errcode,
+        test_token_shared_across_instances,
     ):
         fn()
         print(f"通过: {fn.__name__}")

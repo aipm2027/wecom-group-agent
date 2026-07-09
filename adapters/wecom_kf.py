@@ -49,6 +49,7 @@ class WecomKfAdapter(Adapter):
         callback_port: int | None = None,
         callback_path: str | None = None,
         cursor_path: str | None = None,
+        token_path: str | None = None,
         http_get_json: Callable[[str], dict] | None = None,
         http_post_json: Callable[[str, dict], dict] | None = None,
     ) -> None:
@@ -73,6 +74,9 @@ class WecomKfAdapter(Adapter):
         self._cursor_path = (cursor_path if cursor_path is not None
                              else os.path.join(_ROOT, "data", "wecom_kf_cursor.txt"))
         self._cursor = self._load_cursor()
+        # access_token 跨进程共享（可选）：配 token_path / WECOM_TOKEN_FILE 后，多副本经文件共享，
+        # 减少各自 gettoken 造成的调用风暴；默认 None = 仅进程内内存缓存（单进程足够）。
+        self._token_path = token_path or os.environ.get("WECOM_TOKEN_FILE") or None
 
     # ------------------------------------------------------------------
     # 默认 HTTP 客户端(零第三方依赖)
@@ -127,6 +131,26 @@ class WecomKfAdapter(Adapter):
         except OSError as exc:
             print(f"[WecomKfAdapter] cursor 持久化失败(已忽略): {exc.__class__.__name__}", file=sys.stderr)
 
+    def _load_token_file(self) -> tuple[str, float]:
+        if not self._token_path:
+            return "", 0.0
+        try:
+            with open(self._token_path, encoding="utf-8") as f:
+                d = json.load(f)
+            return d.get("access_token", ""), float(d.get("expires", 0))
+        except (OSError, ValueError):
+            return "", 0.0
+
+    def _save_token_file(self, token: str, expires: float) -> None:
+        if not self._token_path:
+            return
+        try:
+            os.makedirs(os.path.dirname(self._token_path) or ".", exist_ok=True)
+            with open(self._token_path, "w", encoding="utf-8") as f:
+                json.dump({"access_token": token, "expires": expires}, f)
+        except OSError:
+            pass
+
     # ------------------------------------------------------------------
     # 企业微信 API 内部方法
     # ------------------------------------------------------------------
@@ -137,6 +161,12 @@ class WecomKfAdapter(Adapter):
             now = time.time()
             if self._access_token and now < self._token_expires - 60:
                 return self._access_token
+            # 跨进程共享：先看文件里是否有其他副本刚刷新的有效 token
+            if self._token_path:
+                tok, exp = self._load_token_file()
+                if tok and now < exp - 60:
+                    self._access_token, self._token_expires = tok, exp
+                    return tok
             url = f"https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={self.corp_id}&corpsecret={self.kf_secret}"
             try:
                 data = self._http_get_json(url)
@@ -149,6 +179,7 @@ class WecomKfAdapter(Adapter):
                 return ""
             self._access_token = data["access_token"]
             self._token_expires = now + data.get("expires_in", 7200)
+            self._save_token_file(self._access_token, self._token_expires)
             return self._access_token
 
     def _invalidate_token_if_needed(self, data: dict) -> None:
@@ -157,6 +188,7 @@ class WecomKfAdapter(Adapter):
             with self._token_lock:
                 self._access_token = ""
                 self._token_expires = 0.0
+                self._save_token_file("", 0.0)  # 通知其他副本该 token 已失效
 
     def _sync_msg(self, token: str, cursor: str) -> list[dict]:
         try:

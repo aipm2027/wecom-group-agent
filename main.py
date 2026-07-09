@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import sys
 
 from core.router import Router
@@ -94,7 +95,17 @@ def main() -> None:
     load_env_file()
     adapter = build_adapter()
     router = Router(adapter, build_handler(), build_sessions(), on_escalate=_default_on_escalate)
-    adapter.start(router.on_message)
+
+    def _term(signum, frame):
+        raise KeyboardInterrupt
+    try:
+        signal.signal(signal.SIGTERM, _term)  # 容器/systemd 停止(SIGTERM)走优雅退出
+    except (ValueError, OSError):
+        pass  # 非主线程等场景忽略
+    try:
+        adapter.start(router.on_message)
+    except KeyboardInterrupt:
+        print("[main] 收到终止信号，正在退出。", file=sys.stderr)
 
 
 if __name__ == "__main__":
