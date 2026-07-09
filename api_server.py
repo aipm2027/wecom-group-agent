@@ -234,8 +234,9 @@ def _make_handler(app: ApiApp):
 
 
 def build_app() -> ApiApp:
-    from main import build_handler, load_env_file
+    from main import build_handler, exit_if_misconfigured, load_env_file
     load_env_file()
+    exit_if_misconfigured(require_adapter=False)  # 启动自检(P0):HANDLER=llm 漏 key 等静默坑在此拦住
     if os.environ.get("STORE") == "sqlite":
         from core.session_sqlite import SqliteSessionStore
         sessions = SqliteSessionStore(os.environ.get("SQLITE_PATH", "data/sessions.db"))

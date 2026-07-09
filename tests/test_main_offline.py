@@ -105,6 +105,47 @@ def test_load_env_file_no_override() -> None:
         assert os.environ["HANDLER"] == "llm"
 
 
+def test_check_config() -> None:
+    """启动自检（路线图 P0）：三大静默坑 + 取值拼写错误都要被拦住。"""
+    # 合法组合：mock + echo → 无问题
+    with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT=None, HANDLER="echo",
+             KNOWLEDGE_PROVIDER=None, STORE=None):
+        assert main.check_config() == []
+    # 坑1：无适配器（Mac 上会走 ntwork stub 崩）
+    with env(ADAPTER=None, MOCK=None, MOCK_SCRIPT=None, HANDLER="echo",
+             KNOWLEDGE_PROVIDER=None, STORE=None):
+        assert any("适配器" in p for p in main.check_config())
+        # api_server 场景（adapter 可选）则放行
+        assert main.check_config(require_adapter=False) == []
+    # 坑2：ADAPTER=kf 漏企微配置（启动正常但永远收不到消息）
+    with env(ADAPTER="kf", WECOM_CORP_ID=None, WECOM_KF_SECRET=None,
+             WECOM_CALLBACK_TOKEN=None, WECOM_ENCODING_AES_KEY=None,
+             MOCK=None, MOCK_SCRIPT=None, HANDLER="echo", KNOWLEDGE_PROVIDER=None, STORE=None):
+        ps = main.check_config()
+        assert any("WECOM_CORP_ID" in p and "WECOM_KF_SECRET" in p for p in ps)
+    # 坑3：HANDLER=llm 漏 key（静默变兜底复读）——空值与模板占位都算漏配
+    for bad_key in (None, "在这里填你的密钥", "  "):
+        with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT=None, HANDLER="llm", LLM_API_KEY=bad_key,
+                 LLM_PERSONA_FILE=None, LLM_KNOWLEDGE_FILE=None, KNOWLEDGE_PROVIDER=None, STORE=None):
+            assert any("LLM_API_KEY" in p for p in main.check_config()), f"key={bad_key!r} 应被拦"
+    # HANDLER=llm 指到不存在的人设文件
+    with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT=None, HANDLER="llm", LLM_API_KEY="sk-x",
+             LLM_PERSONA_FILE="prompts/不存在.md", LLM_KNOWLEDGE_FILE=None,
+             KNOWLEDGE_PROVIDER=None, STORE=None):
+        assert any("LLM_PERSONA_FILE" in p for p in main.check_config())
+    # 取值拼写错误：KNOWLEDGE_PROVIDER / STORE
+    with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT=None, HANDLER="echo",
+             KNOWLEDGE_PROVIDER="ragg", STORE=None):
+        assert any("KNOWLEDGE_PROVIDER" in p for p in main.check_config())
+    with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT=None, HANDLER="echo",
+             KNOWLEDGE_PROVIDER=None, STORE="sqllite"):
+        assert any("STORE" in p for p in main.check_config())
+    # MOCK_SCRIPT 指向不存在的文件
+    with env(ADAPTER=None, MOCK="1", MOCK_SCRIPT="/no/such/file.json", HANDLER="echo",
+             KNOWLEDGE_PROVIDER=None, STORE=None):
+        assert any("MOCK_SCRIPT" in p for p in main.check_config())
+
+
 def main_() -> None:
     for fn in (
         test_build_knowledge_branches,
@@ -112,6 +153,7 @@ def main_() -> None:
         test_build_handler_branches,
         test_build_adapter_branches,
         test_load_env_file_no_override,
+        test_check_config,
     ):
         fn()
         print(f"通过: {fn.__name__}")

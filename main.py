@@ -91,8 +91,70 @@ def load_env_file(path: str = ".env") -> None:
             os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
 
 
+_KEY_PLACEHOLDER = "在这里填你的密钥"  # .env.example 的模板占位值
+
+
+def check_config(require_adapter: bool = True) -> list[str]:
+    """启动自检（路线图 P0）：返回问题清单，空列表 = 通过。
+
+    宁可拒绝启动，不进入静默降级——漏配 LLM_API_KEY 会静默变成固定兜底话术
+    （运营者花着钱以为 AI 在工作）、Mac 上不设 MOCK/ADAPTER 会走 ntwork stub
+    直接崩、ADAPTER=kf 漏企微配置则进程正常启动但收发永远静默失败。
+    api_server 复用时传 require_adapter=False（其 adapter 本就可选）。
+    """
+    problems: list[str] = []
+    env = os.environ.get
+    root = os.path.dirname(os.path.abspath(__file__))
+
+    if require_adapter:
+        if env("ADAPTER") == "kf":
+            missing = [k for k in ("WECOM_CORP_ID", "WECOM_KF_SECRET",
+                                   "WECOM_CALLBACK_TOKEN", "WECOM_ENCODING_AES_KEY")
+                       if not (env(k) or "").strip()]
+            if missing:
+                problems.append("ADAPTER=kf 缺少企微配置: " + "、".join(missing)
+                                + " —— 到企微管理后台「微信客服」获取后填入 .env")
+        elif env("MOCK") != "1":
+            problems.append("未选择可用适配器 —— 本地模拟请设 MOCK=1；接微信客服请设 ADAPTER=kf"
+                            "（默认的企微群 hook 仅 Windows 且是未实现 stub）")
+        script = env("MOCK_SCRIPT")
+        if env("MOCK") == "1" and script and not os.path.exists(script):
+            problems.append(f"MOCK_SCRIPT 文件不存在: {script}")
+
+    if env("HANDLER", "echo") == "llm":
+        key = (env("LLM_API_KEY") or "").strip()
+        if not key or key == _KEY_PLACEHOLDER:
+            problems.append("HANDLER=llm 但 LLM_API_KEY 未配置（会静默变成固定兜底话术）"
+                            " —— 填 .env 的 LLM_API_KEY；或先用 HANDLER=echo 离线试跑")
+        for var in ("LLM_PERSONA_FILE", "LLM_KNOWLEDGE_FILE"):
+            p = env(var)
+            if p and not os.path.exists(p if os.path.isabs(p) else os.path.join(root, p)):
+                problems.append(f"{var} 文件不存在: {p}")
+
+    kind = env("KNOWLEDGE_PROVIDER", "static").lower()
+    if kind not in ("static", "rag", "structured", "hybrid"):
+        problems.append(f"KNOWLEDGE_PROVIDER={kind!r} 无此取值 —— 可选 static|rag|structured|hybrid")
+
+    store = env("STORE", "")
+    if store not in ("", "memory", "sqlite"):
+        problems.append(f"STORE={store!r} 无此取值 —— sqlite（持久化）或不设（内存）")
+
+    return problems
+
+
+def exit_if_misconfigured(require_adapter: bool = True) -> None:
+    """自检不过则打印全部问题（含修复指引）并以退出码 2 终止。"""
+    problems = check_config(require_adapter)
+    if problems:
+        print("[启动自检] 配置有问题，拒绝启动（修复后重试）：", file=sys.stderr)
+        for p in problems:
+            print(f"  ✗ {p}", file=sys.stderr)
+        sys.exit(2)
+
+
 def main() -> None:
     load_env_file()
+    exit_if_misconfigured()
     adapter = build_adapter()
     router = Router(adapter, build_handler(), build_sessions(), on_escalate=_default_on_escalate)
 
