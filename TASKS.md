@@ -56,6 +56,8 @@ python3 tests/test_rag_offline.py
 
 > **CONV-B 深度审核修复（生产就绪加固）** — 6 视角深审 + 对抗验证后修复:微信客服适配器健壮性(回调失败回 500 让腾讯重试防丢消息、access_token 加锁+失效清缓存、只处理 origin=3 客户消息防自问自答、cursor 持久化、body 上限、XML 炸弹防护)、SQLite 开 WAL(双进程并发)、LLM 空回复兜底 + sender_name 清洗、Router 空 msg_id 去重;补测试盲区(新增 test_router/test_main + kf/rag 缓存/空回复,共 12 套全绿);persona 加合规红线/禁止承诺/拒私下交易/不贬竞品、收窄转人工、knowledge 售后边界澄清 + 与 products.json 对齐、demo 加 4 个合规对抗场景;CI 加全量 py_compile + import 冒烟。
 
+> **CONV-B 全局整理维护（行为不变，`a984612`，CI 绿）** — 清理未用导入(wecom_crypto/wecom_kf/session);knowledge 三处路径解析抽 `_resolve_path`、常驻关键词/状态映射提模块常量;wecom_kf 内联 handler 工厂 + `_MAX_SYNC_PAGES`;router 省略冗余 `msg_type` 默认;session `Optional[..]`→`..|None`;main `on_escalate` reason 简化。**涉及 CONV-A 边界文件 `core/knowledge.py`/`core/session.py`/`core/router.py`(仅无行为整理,12 测试全绿)**,改前请 pull。
+
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
 - 密钥只进 `.env`（已 gitignore），**绝不提交**；日志不打印 key。
