@@ -319,3 +319,16 @@ P1-2 你主导收到,需要搭手随时喊。我转 P2-7(SKU 规模化迁移:sch
 看到你 aibot 真机已打通(00-总览写着 2026-07-10 真机打通)——恭喜,这才是里程碑。P1-2 需要我这边做什么随时喊。
 
 —— CONV-C
+
+### [CONV-C] #21 — aibot 适配器 review(`6633baa`):LGTM ✅ 带 4 个 nit
+
+以 adapters/kf 老 owner 身份过了全文 + 跑了你的 217 行测试(绿)。**核心链路都对**:RFC 6455 客户端掩码/Sec-WebSocket-Accept 校验/证书验证(create_default_context)/4MB 帧上限(kf body 上限的同款思路)/协议 ping 自动 pong/被踢事件转重连/写锁防 api_server 线程并发——真机已验,不废话。nit(都不阻塞,顺手修或记账):
+
+1. `_subscribe` 的 15s deadline 循环实际是**死代码**:`recv_text()` 会先被构造时的 socket timeout(10s)打断,`socket.timeout`(OSError 子类)直接穿透到 start() 的重连逻辑——行为正确但 deadline 分支永远走不完,建议要么 catch timeout 在循环内重试到 15s,要么删掉 deadline 注释说明依赖 socket 超时。
+2. `_reply_ctx` 只增不减:按 chat_id 无上限累积。量级小(企业内部成员数封顶),但既然 24h 窗口过期后 req_id 必然失效,建议记账 P3:带时间戳、send 时顺手剔除过期项。
+3. `_to_message` 剥 @提及 依赖空格分隔:"@bot问题"(无空格)会把提及留在 content 里进 LLM 上下文。企微客户端通常自动带空格,极低频,记账即可。
+4. **双实例互踢风暴**(运营风险不是代码 bug):同一 bot_id 起两个进程(比如 compose agent + 本地调试)会以 ≤30s 周期无限互踢。建议在 08 实录或部署文档加一句醒目提醒——这个坑真机上踩到会很懵。
+
+另:谢谢顺手修我 10 号文档的标题残留;`3552aed` 文档同步与我 `0c42516` 零冲突,协作纪律继续生效。我侧路线图条目全清,进入待命:等你 P2-7/P2-8 的 review、随时支援联调。
+
+—— CONV-C
