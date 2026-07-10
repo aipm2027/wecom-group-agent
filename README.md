@@ -24,6 +24,7 @@ wecom-group-agent/
 │   ├── mock_cli.py      #   本地模拟（交互/JSON 脚本）
 │   ├── ntwork_wecom.py  #   企微群 hook（仅 Windows，stub 待实现）
 │   ├── wecom_kf.py      #   微信客服适配器（官方合规 1:1，已实现）
+│   ├── wecom_aibot.py   #   智能机器人长连接（官方，纯 stdlib WebSocket，已真机打通）
 │   └── wecom_crypto.py  #   企微回调加解密（纯 Python AES-256 / WXBizMsgCrypt）
 ├── api_server.py        # REST API 层（运营后台，stdlib http.server）
 ├── admin_console.py     # 运营管理后台 Web 工作台（零依赖单文件，反代 api_server）
@@ -31,7 +32,7 @@ wecom-group-agent/
 │   ├── persona.md       #   私域导购人设
 │   ├── knowledge.md     #   店铺/产品/FAQ（样例，待替换）
 │   └── products.json    #   结构化商品库样例（structured/hybrid 用）
-├── tests/               # 离线测试（13 套，全绿）
+├── tests/               # 离线测试（15 套，全绿）
 ├── examples/            # 样例与评测（sample.json / demo_agent.py）
 ├── docs/                # 文档（需求/技术/测试三大块，见下）
 ├── .github/workflows/   # GitHub Actions CI（多版本跑全部离线测试）
@@ -59,6 +60,9 @@ STORE=sqlite MOCK=1 HANDLER=llm python3 main.py
 # 5) 微信客服（官方合规 1:1，需公网回调 + .env 配 WECOM_*）
 ADAPTER=kf HANDLER=llm python3 main.py
 
+# 5b) 智能机器人（官方长连接，企业内部单聊/群@bot，零公网依赖，已真机打通）
+ADAPTER=aibot HANDLER=llm KNOWLEDGE_PROVIDER=hybrid STORE=sqlite python3 main.py
+
 # 6) 运营后台 REST API（会话/接管/试聊/指标）
 ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 
@@ -66,7 +70,7 @@ ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 ADMIN_TOKEN=xxx CONSOLE_PASSWORD=yyy python3 admin_console.py
 #    打开 http://127.0.0.1:8090 ，口令登录（需先起 6) 的 API）
 
-# 8) 全部离线测试（13 套）
+# 8) 全部离线测试（15 套）
 for f in tests/test_*.py; do python3 "$f"; done
 ```
 
@@ -117,5 +121,6 @@ docker compose logs -f agent   # 看回调/自检日志
 - ✅ 人工接管：转人工信号 + 接管静默 + REST API（`/api/queue`、takeover/release）
 - ✅ SQLite 持久化（`STORE=sqlite`，重启恢复）+ REST API 运营后台 + GitHub Actions CI（Py 3.9–3.12）
 - ✅ 运营管理后台 Web 工作台（`admin_console.py`：收件箱/接管/人工回复/试聊调试，零依赖单文件）
-- ✅ 微信客服适配器（官方合规 1:1，纯 Python AES-256 回调加解密）——代码就绪，真机公网回调联调待验证
-- ⏳ 真实企微群 hook（`ntwork`）——待 Windows 环境实机
+- ✅ 微信客服适配器（官方合规 1:1，纯 Python AES-256 回调加解密）——代码/SOP/隧道预检就绪，端到端等企业认证
+- ✅ **智能机器人适配器（官方长连接，纯标准库自实现 WebSocket）——2026-07-10 真机订阅打通、agent 在线**（企业内部单聊+群@bot，[联调实录](docs/技术文档/08-智能机器人长连接与真机联调实录.md)）
+- ⏳ 真实企微群 hook（`ntwork`）——P2 远期（群聊诉求已被智能机器人官方通道部分覆盖）

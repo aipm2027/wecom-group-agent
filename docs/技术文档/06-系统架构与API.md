@@ -338,7 +338,7 @@
 
 | 方法 | 路径 | 用途 | 请求/响应要点 |
 |------|------|------|---------------|
-| `GET` | `/api/metrics` | 实时指标 | 返回基础运行时计数：当前会话总数、需人工会话数、人工接管中会话数、消息总条数（来自内存/SQLite 中的 `sessions` 快照）。完整看板保留规划（P2） |
+| `GET` | `/api/metrics` | 实时指标 | 会话总数/需人工数/接管中数/消息总数（`sessions` 快照）+ `escalation_by_reason`（转人工原因按「标签:详情」前缀聚合）+ `agent` 段（回复量/降级次数/平均延迟 ms，agent 进程经 `AGENT_STATS_FILE` 落盘共享，未配置则无此段）。看板前端保留规划（P2） |
 | `GET` | `/api/metrics/dashboard` | 实时看板 | 今日消息量、回复量、触发率、LLM 错误率、人工接管率等（规划 P2） |
 | `GET` | `/api/metrics/events` | 事件查询 | `?type=reply&chat_id=...&from=...&to=...`；分页（规划 P2） |
 | `GET` | `/api/metrics/llm_stats` | LLM 调用统计 | 调用次数、平均延迟、降级次数、token 消耗（估算）（规划 P2） |
