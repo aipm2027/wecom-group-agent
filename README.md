@@ -80,6 +80,7 @@ for f in tests/test_*.py; do python3 "$f"; done
 cp .env.example .env      # 填 LLM_API_KEY + WECOM_*（获取方法见联调 SOP）
 docker compose up -d      # agent(9000 公网回调) + api(8080 仅回环) + console(8090 仅回环)
 docker compose ps         # 期望三服务 Up，api 带 healthcheck
+make health               # 一键健康检查（三服务 ready 与否；compose up 后可用 python3 healthcheck.py --wait 60 等就绪）
 docker compose logs -f agent   # 看回调/自检日志
 ```
 
