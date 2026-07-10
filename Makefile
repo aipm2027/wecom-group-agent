@@ -5,7 +5,7 @@ PY ?= python3
 
 .PHONY: help check test eval eval-online gate compile run-mock demo api console health docker-build docker-up docker-down docker-logs
 
-check: compile test eval ## 一键验证:编译+15 套测试+离线评测(改完代码/内容必跑,全绿才算完)
+check: compile test eval ## 一键验证:编译+全部离线测试+离线评测(改完代码/内容必跑,全绿才算完)
 	@echo "✅ make check 全绿"
 
 help: ## 列出所有命令

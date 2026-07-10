@@ -2,6 +2,10 @@
 
     MOCK=1 [MOCK_SCRIPT=sample.json] python3 main.py   # 本地跑通（Mac）
     python3 main.py                                     # 走真实 ntwork（仅 Windows）
+
+维护者注意:新增一个渠道适配器要同时改三处——① build_adapter() 加分支;
+② check_config() 加该渠道必填项自检(缺配置要拒绝启动,不许静默降级);
+③ CLAUDE.md「改X动哪」表格补一行。参考 ADAPTER=aibot 的现成样例。
 """
 from __future__ import annotations
 
