@@ -13,9 +13,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("WECOM_AIBOT_ID", "bot-test")
 os.environ.setdefault("WECOM_AIBOT_SECRET", "secret-test")
 
-from adapters.wecom_aibot import (_OP_CLOSE, _OP_PING, _OP_PONG, _OP_TEXT,  # noqa: E402
-                                  WecomAibotAdapter, WecomAibotError,
-                                  _encode_frame, _read_frame)
+from adapters.wecom_aibot import (_OP_TEXT, WecomAibotAdapter,  # noqa: E402
+                                  WecomAibotError, _encode_frame, _read_frame)
 
 
 # ── 帧编解码 ──────────────────────────────────────────────────

@@ -64,6 +64,11 @@ make help         # 全部命令
 **换 LLM 模型**:改 `.env` 的 `LLM_MODEL`(如有需要连 `LLM_BASE_URL`/`LLM_API_KEY`),
 然后 **必须 `make gate` 全绿** 才算完成——这是合规门禁,不是建议。
 
+**真机联调/重启智能机器人(aibot)**:`ADAPTER=aibot HANDLER=llm KNOWLEDGE_PROVIDER=hybrid STORE=sqlite python3 main.py`。
+⚠️ 同一 bot_id **全网只允许一条长连接**——起第二个进程会与第一个以 ≤30s 周期互踢(日志反复"被新连接踢下线"),
+本地调试前先停掉服务器/别处的进程。凭据(`WECOM_AIBOT_ID/SECRET`)必须用企微后台的「复制」按钮取,手抄必错(853000)。
+回复有 24h 窗口:客户超 24h 没来过消息,人工/主动发送不出去是平台规则不是 bug。协议细节见 `docs/技术文档/08`。
+
 **出了 bug 怎么排查**:先 `make check` 定位是哪套测试红;日志都在 stderr(容器里 `docker compose logs -f`);
 `make health` 看服务活没活着;历史坑大概率 `docs/技术文档/09` 里有同款。
 
