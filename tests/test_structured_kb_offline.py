@@ -238,6 +238,42 @@ def test_validate_products_file_real_sample() -> None:
     assert validate_products_file() == [], "样例商品文件不应有 schema 问题"
 
 
+# ---------------------------------------------------------------------------
+# 规格标准化（P2-7）
+# ---------------------------------------------------------------------------
+
+def test_extract_grams() -> None:
+    """重量表达归一:半斤/N斤/N两/N克/Ng/N千克/Nkg/全角。"""
+    from core.knowledge import _extract_grams
+    assert _extract_grams("来半斤") == {250.0}
+    assert _extract_grams("2斤装") == {1000.0}
+    assert _extract_grams("250克 和 0.5kg") == {250.0, 500.0}
+    assert _extract_grams("２５０ｇ") == {250.0}, "全角应经 NFKC 归一"
+    assert _extract_grams("二两") == set(), "中文数字不识别(可接受,宁缺毋滥)"
+    assert _extract_grams("30 包") == set(), "无单位数量词不应误判为重量"
+
+
+def test_is_hit_by_grams() -> None:
+    """克数通路:查询用'半斤'也能命中 250g 商品;无重量查询不受影响。"""
+    kb = StructuredKnowledgeProvider(products=[
+        {"product_id": "S1", "name": "巴旦木 250g", "price": 49, "spec": "250g/袋", "keywords": ["巴旦木"]},
+        {"product_id": "S2", "name": "夏威夷果 150g", "price": 68, "spec": "150g/罐", "keywords": ["夏威夷果"]},
+    ])
+    out = kb.retrieve("有没有半斤装的?")
+    assert "巴旦木" in out, f"半斤=250g 应命中,实际 {out!r}"
+    assert "夏威夷果" not in out, "150g 不应被半斤命中"
+    out2 = kb.retrieve("巴旦木什么价")
+    assert "巴旦木" in out2, "子串通路不受影响"
+
+
+def test_is_hit_fullwidth_normalized() -> None:
+    """全角/大小写归一:'ｓｋｕ００１'式查询照样命中。"""
+    kb = StructuredKnowledgeProvider(products=[
+        {"product_id": "SKU001", "name": "每日坚果", "price": 99, "keywords": []},
+    ])
+    assert "每日坚果" in kb.retrieve("查一下ＳＫＵ００１"), "全角 ID 应命中"
+
+
 def main() -> None:
     for fn in (
         test_hit_by_name_or_keyword,
@@ -253,6 +289,9 @@ def main() -> None:
         test_smoke_static_and_rag,
         test_validate_products_schema,
         test_validate_products_file_real_sample,
+        test_extract_grams,
+        test_is_hit_by_grams,
+        test_is_hit_fullwidth_normalized,
     ):
         fn()
         print(f"通过: {fn.__name__}")

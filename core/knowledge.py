@@ -20,6 +20,7 @@ import os
 import re
 import socket
 import sys
+import unicodedata
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -88,6 +89,32 @@ def validate_products_file(path: str = "prompts/products.json") -> "list[str]":
     except json.JSONDecodeError as exc:
         return [f"商品文件 JSON 语法错误（整库将不可用）: {exc}"]
     return validate_products(data)[1]
+
+
+# ── 规格标准化（P2-7）──────────────────────────────────────────
+# 客户口语与商品数据的单位写法常不一致（"半斤"↔"250g"、"２５０ｇ"全角、"0.5 千克"），
+# 子串匹配对这类变体召回≈0。归一到克数集合后求交集，作为 _is_hit 的补充通路。
+_UNIT_GRAMS = (("千克", 1000.0), ("公斤", 1000.0), ("kg", 1000.0),
+               ("斤", 500.0), ("两", 50.0), ("克", 1.0), ("g", 1.0))
+_GRAM_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(千克|公斤|kg|斤|两|克|g)")
+
+
+def _normalize_text(text: str) -> str:
+    """全角→半角、统一小写（unicodedata.NFKC 顺带把 ２５０ｇ → 250g）。"""
+    return unicodedata.normalize("NFKC", text or "").lower()
+
+
+def _extract_grams(text: str) -> "set[float]":
+    """提取文本中的重量表达并归一为克数集合（识别 半斤/N斤/N两/N克/Ng/N千克/Nkg）。"""
+    t = _normalize_text(text)
+    grams = {float(num) * unit
+             for num, unit_name in _GRAM_RE.findall(t)
+             for u_name, unit in _UNIT_GRAMS if u_name == unit_name}
+    if "半斤" in t:
+        grams.add(250.0)
+    if "半公斤" in t or "半千克" in t:
+        grams.add(500.0)
+    return grams
 
 
 def _resolve_path(path: str) -> str:
@@ -407,14 +434,27 @@ class StructuredKnowledgeProvider(KnowledgeProvider):
         return []
 
     def _is_hit(self, product: dict, query: str) -> bool:
-        """判断商品是否命中 query：name / product_id / category / keywords 任一作为子串出现。"""
-        q = query.lower()
+        """判断商品是否命中 query。
+
+        两条通路（任一命中即真）：
+        1) 子串：name / product_id / category / keywords 任一作为子串出现（全角/大小写归一）；
+        2) 克数：query 中的重量表达（半斤/250 克/0.5kg…）与商品 name/spec/keywords
+           中的重量归一后有交集——解决"单位写法不一致召回≈0"（P2-7）。
+        """
+        q = _normalize_text(query)
         for field in ("name", "product_id", "category"):
             val = product.get(field, "")
-            if isinstance(val, str) and val.lower() in q:
+            if isinstance(val, str) and val and _normalize_text(val) in q:
                 return True
         for kw in (product.get("keywords") or []):
-            if isinstance(kw, str) and kw.lower() in q:
+            if isinstance(kw, str) and kw and _normalize_text(kw) in q:
+                return True
+        query_grams = _extract_grams(query)
+        if query_grams:
+            product_text = " ".join(
+                [str(product.get("name", "")), str(product.get("spec", ""))]
+                + [k for k in (product.get("keywords") or []) if isinstance(k, str)])
+            if query_grams & _extract_grams(product_text):
                 return True
         return False
 

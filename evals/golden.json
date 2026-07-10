@@ -36,6 +36,15 @@
     "notes": "SKU008"
   },
   {
+    "id": "spec-halfjin",
+    "category": "结构化查价",
+    "provider": "structured",
+    "query": "有没有半斤装的?",
+    "retrieval": {"must_include": ["巴旦木", "¥49"], "must_not_include": ["夏威夷果"]},
+    "reply": {"must_include_any": ["巴旦木", "49"]},
+    "notes": "P2-7 规格标准化:半斤=250g 只命中 SKU008(克数集合精确交集,可放心断言 must_not)"
+  },
+  {
     "id": "stock-pecan",
     "category": "库存状态",
     "provider": "structured",
