@@ -35,7 +35,7 @@ wecom-group-agent/
 │   ├── persona.md       #   私域导购人设
 │   ├── knowledge.md     #   店铺/产品/FAQ（样例，待替换）
 │   └── products.json    #   结构化商品库样例（structured/hybrid 用）
-├── tests/               # 离线测试（15 套，全绿）
+├── tests/               # 离线测试（16 套，全绿）
 ├── examples/            # 样例与评测（sample.json / demo_agent.py）
 ├── docs/                # 文档（需求/技术/测试三大块，见下）
 ├── .github/workflows/   # GitHub Actions CI（多版本跑全部离线测试）
@@ -73,7 +73,7 @@ ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 ADMIN_TOKEN=xxx CONSOLE_PASSWORD=yyy python3 admin_console.py
 #    打开 http://127.0.0.1:8090 ，口令登录（需先起 6) 的 API）
 
-# 8) 全部离线测试（15 套）
+# 8) 全部离线测试（16 套）
 for f in tests/test_*.py; do python3 "$f"; done
 ```
 

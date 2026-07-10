@@ -37,8 +37,8 @@
 ## 一键命令(在仓库根目录)
 
 ```bash
-make check        # 编译+15 套测试+离线评测,全绿才算改完(最常用)
-make test         # 只跑 15 套离线测试
+make check        # 编译+16 套测试+离线评测,全绿才算改完(最常用)
+make test         # 只跑 16 套离线测试
 make eval         # 离线评测(知识检索+转人工规则,无需网络)
 make eval-online  # 在线评测(真 LLM,需 .env 的 LLM_API_KEY)
 make gate         # 合规门禁:改 persona/换模型后必跑,全绿才能上线
