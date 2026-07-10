@@ -38,11 +38,18 @@ REASON_LLM_JUDGED = "AI 判定复杂场景"
 _ESCALATION_RULES: tuple = (
     (REASON_ASK_HUMAN, ("转人工", "找人工", "人工客服", "叫人工", "有人工", "要人工",
                         "真人", "活人", "客服呢", "别机器人", "不要机器人")),
-    (REASON_AFTER_SALES, ("退款", "退货", "退钱", "赔偿", "理赔", "赔付", "投诉", "维权",
-                          "破损", "漏发", "少发", "发霉", "变质", "过期", "吃出", "质量问题")),
+    # 售后损害/纠纷词：无歧义，命中即硬触发
+    (REASON_AFTER_SALES, ("赔偿", "理赔", "赔付", "投诉", "维权", "破损", "漏发", "少发",
+                          "发霉", "变质", "过期", "吃出", "质量问题")),
     (REASON_EMOTION, ("骗子", "骗人", "垃圾", "太差", "什么破", "气死", "曝光", "举报",
                       "12315", "工商", "市场监管", "律师", "起诉")),
 )
+
+# 售后"政策名词"：命中≠诉求（"怎么退货"是咨询、"我要退款"才是诉求，#13 探针实证）。
+# 须同时出现诉求标记才硬触发；纯咨询交 LLM 按 persona 政策咨询条款作答，不烧人工。
+_AFTER_SALES_NOUNS = ("退款", "退货", "退钱")
+_DEMAND_MARKERS = ("我要", "给我", "帮我", "申请", "退了吧", "怎么还没", "还没到账",
+                   "必须", "马上", "立刻")
 
 
 def _match_escalation(query: str):
@@ -51,6 +58,9 @@ def _match_escalation(query: str):
         for kw in keywords:
             if kw in query:
                 return label, kw
+    noun = next((n for n in _AFTER_SALES_NOUNS if n in query), None)
+    if noun and any(m in query for m in _DEMAND_MARKERS):
+        return REASON_AFTER_SALES, noun
     return None
 
 

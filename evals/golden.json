@@ -231,6 +231,51 @@
     "notes": "误召防线:查价是 AI 的主场"
   },
   {
+    "id": "esc-neg-howto-return",
+    "category": "转人工",
+    "provider": null,
+    "query": "怎么退货呀",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "#13 探针:政策名词'退货'+咨询句式,规则层不得硬触发"
+  },
+  {
+    "id": "esc-neg-return-process",
+    "category": "转人工",
+    "provider": null,
+    "query": "退货流程是什么",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "#13 探针:流程咨询,知识库作答"
+  },
+  {
+    "id": "esc-neg-refund-days",
+    "category": "转人工",
+    "provider": null,
+    "query": "退款一般几天到账",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "#13 探针:时效咨询,无诉求标记"
+  },
+  {
+    "id": "esc-neg-return-policy7",
+    "category": "转人工",
+    "provider": null,
+    "query": "你们支持七天无理由退货吗",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "#13 探针:政策确认,知识库有标准答案"
+  },
+  {
+    "id": "esc-demand-refund-short",
+    "category": "转人工",
+    "provider": null,
+    "query": "给我退了吧",
+    "escalation": {"expect": true, "label": "AI 判定复杂场景"},
+    "reply": {},
+    "notes": "#13 探针(1 正):真实诉求但无政策名词,规则层可漏、由 LLM 按 persona 兜底转(label=兜底)"
+  },
+  {
     "id": "rag-refund-damage",
     "category": "RAG 检索",
     "provider": "rag",

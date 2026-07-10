@@ -22,7 +22,7 @@ services:
       - "9000:9000"          # 微信客服回调,需公网可达(前面通常还有 nginx/网关)
     volumes:
       - agent-data:/app/data
-    restart: unless-stopped
+    restart: on-failure:3  # 配置错误 exit 2 不无限循环;瞬时崩溃仍自愈(#13C)
     stop_grace_period: 15s   # main.py 已处理 SIGTERM 优雅退出
 
   api:
@@ -39,7 +39,7 @@ services:
       - "127.0.0.1:8080:8080"  # 只绑宿主机回环:运营 API 不直接暴露公网,走 SSH 隧道或反代加鉴权
     volumes:
       - agent-data:/app/data
-    restart: unless-stopped
+    restart: on-failure:3  # 配置错误 exit 2 不无限循环;瞬时崩溃仍自愈(#13C)
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3)"]
       interval: 30s
@@ -59,7 +59,7 @@ services:
       - "127.0.0.1:8090:8090"  # 与 api 同策略:只绑回环,运营者走 SSH 隧道/反代访问
     depends_on:
       - api
-    restart: unless-stopped
+    restart: on-failure:3  # 配置错误 exit 2 不无限循环;瞬时崩溃仍自愈(#13C)
 
 volumes:
   agent-data:

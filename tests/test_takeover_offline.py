@@ -102,6 +102,12 @@ def test_classify_escalation_labels() -> None:
     assert classify_escalation("已经拆封了还能退吗") is None
     assert classify_escalation("每日坚果礼盒 30 包现在什么价?") is None
     assert classify_escalation("再便宜点,不然我不买了") is None
+    # #13 探针:政策名词+咨询句式不硬触发,名词+诉求标记才算诉求
+    assert classify_escalation("怎么退货呀") is None
+    assert classify_escalation("退款一般几天到账") is None
+    assert classify_escalation("你们支持七天无理由退货吗") is None
+    assert classify_escalation("我要退款") == REASON_AFTER_SALES
+    assert classify_escalation("退款怎么还没到账") == REASON_AFTER_SALES
 
 
 def test_rule_escalates_even_without_llm_tag() -> None:
