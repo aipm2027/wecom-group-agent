@@ -23,6 +23,7 @@ import itertools
 import json
 import os
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -110,7 +111,8 @@ class ApiApp:
         session.add(Message(
             chat_id=chat_id, chat_type=session.history[-1].chat_type if session.history else "single",
             msg_id=f"human-{chat_id}-{seq}", sender_id=HUMAN_SENDER_ID,
-            sender_name=(data.get("sender_name") or "人工客服"), content=text, msg_type="text"))
+            sender_name=(data.get("sender_name") or "人工客服"), content=text, msg_type="text",
+            timestamp=int(time.time() * 1000)))  # 与 router/适配器统一毫秒口径
         sent = False
         if self.adapter is not None:
             try:

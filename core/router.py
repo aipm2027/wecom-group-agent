@@ -94,6 +94,7 @@ class Router:
             sender_id=BOT_SENDER_ID,
             sender_name="Bot",
             content=reply,
+            timestamp=int(time.time() * 1000),  # 统一毫秒(与适配器口径一致;原默认 0 会毁掉按时间聚合/排序)
         ))
 
         # 6) 若本轮 agent 判定需人工，触发升级回调（通知工作台等）
