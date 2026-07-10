@@ -87,7 +87,7 @@
 | **传输无关三层** | 传输适配器 ↔ Router ↔ Handler/Session，任何一层替换不影响其余层。 |
 | **零依赖核心** | `core/` 纯 Python 标准库，LLM 调用用 `urllib`，无 `fastapi`/`sqlalchemy`/`redis` 等强依赖。SQLite / HTTP 层作为可选扩展，不污染核心。 |
 | **可插拔知识模块** | `KnowledgeProvider` 抽象基类（`retrieve(query)`），当前已实现四实现：`StaticKnowledgeProvider`（全量提示词直塞）、`RagKnowledgeProvider`（语义 embedding + 混合检索 + 缓存）、`StructuredKnowledgeProvider`（精确商品查询）、`HybridKnowledgeProvider`（结构化 + RAG 组合兜底）。`LLMHandler` 通过 `build_knowledge()` 注入，一行不改。详见 [core/knowledge.py](../../core/knowledge.py)。 |
-| **前端仅按 API 契约对接** | 运营后台前端由调用方自行开发，本项目只提供 REST API 契约与鉴权说明。 |
+| **前端仅按 API 契约对接** | 运营后台前端由调用方自行开发，本项目只提供 REST API 契约与鉴权说明。**内置参考实现**：[admin_console.py](../../admin_console.py) 零依赖单文件 Web 工作台（同源反代 `/api/*`，`ADMIN_TOKEN` 服务端注入不下发前端，`CONSOLE_PASSWORD` 登录，收件箱/接管/人工回复/试聊），既可直接生产使用，也可作为自研前端的契约用法范例。 |
 
 ---
 
