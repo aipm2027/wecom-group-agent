@@ -3,10 +3,38 @@
 
 PY ?= python3
 
-.PHONY: help check test eval eval-online gate compile run-mock demo api console health docker-build docker-up docker-down docker-logs
+.PHONY: help check test eval eval-online gate compile run-mock demo api console health up down logs status docker-build docker-up docker-down docker-logs
 
 check: compile test eval ## 一键验证:编译+全部离线测试+离线评测(改完代码/内容必跑,全绿才算完)
 	@echo "✅ make check 全绿"
+
+# ── 本地三件套一键启停(不需要 Docker;进程号记在 data/run/) ──
+up: ## 一键启动:机器人+接口+工作台(已在跑的会先停),完成后自动体检
+	@mkdir -p data/run
+	@$(MAKE) -s down 2>/dev/null || true
+	@ADAPTER=aibot HANDLER=llm KNOWLEDGE_PROVIDER=hybrid STORE=sqlite \
+	  AGENT_STATS_FILE=data/agent_stats.json nohup $(PY) main.py > data/agent.log 2>&1 & \
+	  echo $$! > data/run/agent.pid
+	@ADAPTER=aibot STORE=sqlite AGENT_STATS_FILE=data/agent_stats.json \
+	  nohup $(PY) api_server.py > data/api.log 2>&1 & echo $$! > data/run/api.pid
+	@nohup $(PY) admin_console.py > data/console.log 2>&1 & echo $$! > data/run/console.pid
+	@echo "已启动:agent($$(cat data/run/agent.pid)) api($$(cat data/run/api.pid)) console($$(cat data/run/console.pid))"
+	@$(PY) healthcheck.py --wait 30
+	@echo "👉 工作台: http://127.0.0.1:8090(口令见 .env 的 CONSOLE_PASSWORD)"
+
+down: ## 一键停止三件套(优雅退出,聊天记录不丢)
+	@for s in agent api console; do \
+	  if [ -f data/run/$$s.pid ]; then \
+	    kill $$(cat data/run/$$s.pid) 2>/dev/null && echo "已停止 $$s($$(cat data/run/$$s.pid))" || true; \
+	    rm -f data/run/$$s.pid; \
+	  fi; \
+	done
+
+status: ## 三件套在跑吗?(健康检查别名)
+	@$(PY) healthcheck.py
+
+logs: ## 跟踪三件套日志(Ctrl+C 退出)
+	@tail -f data/agent.log data/api.log data/console.log
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
