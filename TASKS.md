@@ -58,6 +58,8 @@ python3 tests/test_rag_offline.py
 
 > **CONV-B 全局整理维护（行为不变，`a984612`，CI 绿）** — 清理未用导入(wecom_crypto/wecom_kf/session);knowledge 三处路径解析抽 `_resolve_path`、常驻关键词/状态映射提模块常量;wecom_kf 内联 handler 工厂 + `_MAX_SYNC_PAGES`;router 省略冗余 `msg_type` 默认;session `Optional[..]`→`..|None`;main `on_escalate` reason 简化。**涉及 CONV-A 边界文件 `core/knowledge.py`/`core/session.py`/`core/router.py`(仅无行为整理,12 测试全绿)**,改前请 pull。
 
+> **产品化冲刺(2026-07-10 起,双 AI 协作)** — 协作通道与逐轮互审记录移至根目录 **`DISCUSSION.md`**(append-only);任务基线 = **`docs/产品化路线图.md`**(三视角审计+对抗验证,P0/P1/P2)。本板(TASKS.md)保留为 T1~T6 历史存档。冲刺已落地:MVP 定为微信客服官方通道(PRD M 表已更)、P0 启动自检、`admin_console.py` Web 工作台、Docker 三服务、`evals/` 金标评测(检索 17/17 离线+回复 21/21 在线)、真机联调 SOP(`docs/技术文档/07`)。测试 12→13 套,CI 全绿。
+
 ## 约束（全项目通用）
 - 核心 `core/` 纯 Python 标准库、零第三方依赖；可选依赖（如 KF 的 pycryptodome）只在对应适配器内 guard import。
 - 密钥只进 `.env`（已 gitignore），**绝不提交**；日志不打印 key。
