@@ -3,7 +3,7 @@
 
 PY ?= python3
 
-.PHONY: help test eval compile run-mock demo api console health docker-build docker-up docker-down docker-logs
+.PHONY: help test eval eval-online gate compile run-mock demo api console health docker-build docker-up docker-down docker-logs
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -21,6 +21,9 @@ eval: ## 跑离线评测集(知识检索质量,无需网络/密钥)
 
 eval-online: ## 跑在线评测(真 LLM 回复质量,需 .env 里的 LLM_API_KEY)
 	$(PY) evals/run_evals.py --online
+
+gate: ## 合规换版门禁(P2-6):换模型/改 persona 必跑;合规+转人工类目在线全绿+judge 才放行
+	$(PY) evals/run_evals.py --gate
 
 compile: ## 全量字节编译 + import 冒烟(快速语法/依赖检查)
 	$(PY) -m compileall -q core adapters tests evals main.py api_server.py admin_console.py examples

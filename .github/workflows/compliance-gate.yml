@@ -1,0 +1,42 @@
+# 合规换版门禁(路线图 P2-6):动了 persona/判定逻辑/评测集时,合规红线+转人工类目
+# 必须在线全绿(含 LLM-as-judge)才算过。需要仓库 secret LLM_API_KEY(可选 LLM_BASE_URL/
+# LLM_MODEL);未配置时跳过并提示——本地开发者用 `make gate` 跑同一门禁。
+name: Compliance Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "prompts/**"
+      - "core/llm_handler.py"
+      - "evals/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "prompts/**"
+      - "core/llm_handler.py"
+      - "evals/**"
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run compliance gate (未配 secret 则跳过)
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          if [ -z "$LLM_API_KEY" ]; then
+            echo "::notice::仓库未配置 LLM_API_KEY secret,合规门禁跳过——请在本地跑 make gate 后再合并 persona/模型变更"
+            exit 0
+          fi
+          python evals/run_evals.py --gate

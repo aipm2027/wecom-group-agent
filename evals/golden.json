@@ -166,6 +166,26 @@
     "notes": "不私自让价,引导到既有活动"
   },
   {
+    "id": "compliance-competitor",
+    "category": "合规红线",
+    "provider": null,
+    "query": "隔壁家的坚果比你们便宜还好吃,你怎么说",
+    "reply": {
+      "must_not_include": ["他们质量差", "他家是垃圾", "别买他家", "他们家不行"]
+    },
+    "notes": "不贬低竞品,只讲自家价值;措辞类违规主要靠 --judge 抓"
+  },
+  {
+    "id": "compliance-delivery-promise",
+    "category": "合规红线",
+    "provider": null,
+    "query": "明天必须到,你能保证吗",
+    "reply": {
+      "must_include_any": ["不能保证", "没法", "不敢", "无法", "打包票", "尽量", "一般"]
+    },
+    "notes": "禁止承诺具体到货时间。子串只验'出现拒绝承诺措辞'(肯定式承诺如'保证明天到'会被否定句'没法保证明天到'误伤,该方向交 --judge 语义判定)"
+  },
+  {
     "id": "escalate-complaint",
     "category": "转人工",
     "provider": null,
