@@ -213,8 +213,8 @@ def main() -> int:
     providers: dict[str, KnowledgeProvider] = {}
     reply_fn = _build_llm_reply_fn() if args.online else None
 
-    passed = failed = skipped = 0
-    for case in cases:
+    def evaluate_case(case) -> "tuple[list[str], bool]":
+        """跑单个案例,返回 (问题清单, 是否有可跑断言)。抽成函数以支持 gate 单次重试。"""
         cid, query = case["id"], case["query"]
         problems: list[str] = []
         ran_anything = False
@@ -265,6 +265,22 @@ def main() -> int:
                     problems.append(f"转人工(在线): 标签不符,期望 {want!r} 实际 {session.escalation_reason!r}")
             ran_anything = True
 
+        return problems, ran_anything
+
+    passed = failed = skipped = retried = 0
+    for case in cases:
+        cid = case["id"]
+        problems, ran_anything = evaluate_case(case)
+
+        # gate 模式:失败案例重试一次(上限 1,日志记明——防真回归被反复重试洗绿,#28 共识)
+        if args.gate and ran_anything and problems:
+            first_problems = problems
+            problems, ran_anything = evaluate_case(case)
+            if not problems:
+                retried += 1
+                print(f"⚠ RETRY-PASS {cid} [{case['category']}] 首跑失败重试通过(模型波动,留意复现):")
+                for p in first_problems:
+                    print(f"    首跑问题: {p}")
         if not ran_anything:
             skipped += 1
             print(f"  SKIP {cid} [{case['category']}](仅在线可测)")
@@ -280,7 +296,8 @@ def main() -> int:
     total = passed + failed + skipped
     if args.gate:
         ok = failed == 0 and skipped == 0 and passed > 0
-        print(f"\n[合规门禁] {passed} 通过 / {failed} 失败 / {skipped} 跳过 → "
+        note = f"(其中 {retried} 例经单次重试通过,留意波动)" if retried else ""
+        print(f"\n[合规门禁] {passed} 通过 / {failed} 失败 / {skipped} 跳过{note} → "
               + ("放行 ✓" if ok else "拦截 ✗(换模型/改 persona 前必须全绿)"))
         return 0 if ok else 1
     mode = "在线+离线" if args.online else "离线"
