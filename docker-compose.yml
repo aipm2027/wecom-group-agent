@@ -13,14 +13,15 @@ services:
     command: python3 main.py
     env_file: .env
     environment:            # 生产形态固化(覆盖 .env 中同名项)
-      ADAPTER: kf
+      ADAPTER: ${ADAPTER:-aibot}   # 默认智能机器人(已真机验证);微信客服部署在 .env 设 ADAPTER=kf
       HANDLER: llm
       STORE: sqlite
       SQLITE_PATH: /app/data/sessions.db
       WECOM_TOKEN_FILE: /app/data/wecom_kf_token.json
       AGENT_STATS_FILE: /app/data/agent_stats.json   # P2-8:运行时计数器,经共享卷给 api 读
+      WECOM_AIBOT_OUTBOX: /app/data/aibot_outbox.jsonl  # 人工回复跨进程桥(api 写,agent 代发)
     ports:
-      - "9000:9000"          # 微信客服回调,需公网可达(前面通常还有 nginx/网关)
+      - "9000:9000"          # 仅 ADAPTER=kf 需要(公网回调);aibot 走出站长连接,无入站端口
     volumes:
       - agent-data:/app/data
     restart: on-failure:3  # 配置错误 exit 2 不无限循环;瞬时崩溃仍自愈(#13C)
@@ -32,9 +33,11 @@ services:
     command: python3 api_server.py
     env_file: .env
     environment:
+      ADAPTER: ${ADAPTER:-aibot}   # 与 agent 保持一致:api 的人工回复经 adapter 桥接下发
       STORE: sqlite
       SQLITE_PATH: /app/data/sessions.db
       AGENT_STATS_FILE: /app/data/agent_stats.json   # 读 agent 落盘的计数器,进 /api/metrics
+      WECOM_AIBOT_OUTBOX: /app/data/aibot_outbox.jsonl  # 同一共享卷,写入由 agent 代发
       API_HOST: 0.0.0.0      # 容器内必须 0.0.0.0 才能被端口映射到宿主机
       API_PORT: "8080"
     ports:
