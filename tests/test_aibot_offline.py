@@ -222,6 +222,13 @@ def test_outbox_bridge_roundtrip() -> None:
         assert not os.path.exists(tf) and not os.path.exists(tf + ".sending"), "队列应被清空"
         # ③ 空队列再排一次不炸
         agent_side._drain_outbox()
+        # ④ 重放边界(#36-C②):过期条目(排队超时效)丢弃不发,防 agent 重启后重放旧人工回复
+        with open(tf, "w", encoding="utf-8") as f:
+            f.write(json.dumps({"chat_id": "aibot-single-zhang", "text": "昨天的旧回复",
+                                "ts": time.time() - 999999}, ensure_ascii=False) + "\n")
+        ws.sent.clear()
+        agent_side._drain_outbox()
+        assert not [m for m in ws.sent if m.get("cmd") == "aibot_respond_msg"], "过期条目不得代发"
     finally:
         os.environ.pop("WECOM_AIBOT_OUTBOX", None)
         for p in (tf, tf + ".sending"):

@@ -45,6 +45,10 @@ _MAX_FRAME = 4 * 1024 * 1024  # 单帧上限,防异常长度攻击/失配
 # 帧 opcode
 _OP_CONT, _OP_TEXT, _OP_BIN, _OP_CLOSE, _OP_PING, _OP_PONG = 0x0, 0x1, 0x2, 0x8, 0x9, 0xA
 
+# outbox 桥接的排队时效:超过此秒数的人工回复视为过期丢弃(agent 停机期间攒下的旧消息
+# 重启后不应再发——运营者早已改用别的方式联系,#36-C② 重放边界)
+_OUTBOX_MAX_AGE = 600.0
+
 
 class WecomAibotError(RuntimeError):
     """智能机器人长连接协议错误。"""
@@ -388,6 +392,10 @@ class WecomAibotAdapter(Adapter):
         for ln in lines:
             try:
                 item = json.loads(ln)
+                if time.time() - float(item.get("ts", 0)) > _OUTBOX_MAX_AGE:
+                    print(f"[aibot] outbox 过期条目丢弃(排队超 {int(_OUTBOX_MAX_AGE)}s,防重启后重放旧人工回复): "
+                          f"{item.get('chat_id')}", file=sys.stderr)
+                    continue
                 self.send(item["chat_id"], item["text"])  # 本进程有 ws,走真实下发分支
             except Exception as exc:  # noqa: BLE001  # 单条坏数据/发送失败不拖垮队列
                 print(f"[aibot] outbox 单条代发失败已跳过: {exc.__class__.__name__}: {exc}", file=sys.stderr)
