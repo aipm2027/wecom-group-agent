@@ -3,7 +3,10 @@
 
 PY ?= python3
 
-.PHONY: help test eval eval-online gate compile run-mock demo api console health docker-build docker-up docker-down docker-logs
+.PHONY: help check test eval eval-online gate compile run-mock demo api console health docker-build docker-up docker-down docker-logs
+
+check: compile test eval ## 一键验证:编译+15 套测试+离线评测(改完代码/内容必跑,全绿才算完)
+	@echo "✅ make check 全绿"
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
