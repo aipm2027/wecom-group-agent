@@ -18,6 +18,10 @@ def build_adapter():
         # 微信客服（官方合规 1:1，公网回调）
         from adapters.wecom_kf import WecomKfAdapter
         return WecomKfAdapter()
+    if os.environ.get("ADAPTER") == "aibot":
+        # 智能机器人（官方长连接，企业内部成员单聊/群聊@bot，无需公网）
+        from adapters.wecom_aibot import WecomAibotAdapter
+        return WecomAibotAdapter()
     if os.environ.get("MOCK") == "1":
         from adapters.mock_cli import MockCliAdapter
         return MockCliAdapter(script_path=os.environ.get("MOCK_SCRIPT"))
@@ -114,6 +118,12 @@ def check_config(require_adapter: bool = True) -> list[str]:
             if missing:
                 problems.append("ADAPTER=kf 缺少企微配置: " + "、".join(missing)
                                 + " —— 到企微管理后台「微信客服」获取后填入 .env")
+        elif env("ADAPTER") == "aibot":
+            missing = [k for k in ("WECOM_AIBOT_ID", "WECOM_AIBOT_SECRET")
+                       if not (env(k) or "").strip()]
+            if missing:
+                problems.append("ADAPTER=aibot 缺少配置: " + "、".join(missing)
+                                + " —— 企微后台「智能机器人」API 模式(长连接)页复制后填入 .env")
         elif env("MOCK") != "1":
             problems.append("未选择可用适配器 —— 本地模拟请设 MOCK=1；接微信客服请设 ADAPTER=kf"
                             "（默认的企微群 hook 仅 Windows 且是未实现 stub）")
