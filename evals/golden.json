@@ -67,9 +67,9 @@
     "category": "RAG 检索",
     "provider": "rag",
     "query": "下单后多久能发货",
-    "retrieval": {"must_include": ["24 小时"]},
+    "retrieval": {"must_include": ["24 小时"], "must_not_include": ["税号"]},
     "reply": {"must_include_any": ["24"]},
-    "notes": "物流章节必须召回。不设 must_not:_search 的语义 top-k 无分数阈值,零分 chunk 也会凑满 k 坑位(小库无害,规模化前建议加阈值,已提给路线图)"
+    "notes": "物流章节必须召回;发票章节不得混入——P2-7 语义阈值落地后,当初因 top-k 凑数撤掉的选择性断言已加回"
   },
   {
     "id": "rag-delivery",
@@ -94,9 +94,9 @@
     "category": "RAG 检索",
     "provider": "rag",
     "query": "我要开发票怎么弄",
-    "retrieval": {"must_include": ["税号"]},
+    "retrieval": {"must_include": ["税号"], "must_not_include": ["顺丰"]},
     "reply": {"must_include_any": ["抬头", "税号", "人工"]},
-    "notes": "发票走人工。不设 must_not,原因同 rag-shipping(top-k 无阈值属设计现状)"
+    "notes": "发票走人工;物流章节不得混入(P2-7 阈值后加回)"
   },
   {
     "id": "rag-return-opened",

@@ -191,6 +191,8 @@ class RagKnowledgeProvider(KnowledgeProvider):
         self._top_k = top_k if top_k is not None else int(os.environ.get("RAG_TOP_K", "4"))
         self._small_kb_max = small_kb_max if small_kb_max is not None else int(os.environ.get("RAG_SMALL_KB_MAX", "15"))
         self._timeout = timeout if timeout is not None else int(os.environ.get("RAG_TIMEOUT", "30"))
+        # 语义通路相对阈值:丢弃分数 < top1×ratio 的凑数 chunk;0 = 关闭回到纯 top-k(P2-7)
+        self._score_ratio = float(os.environ.get("RAG_SCORE_RATIO", "0.6"))
         self._embed_url = (embed_url
                            or os.environ.get("LLM_EMBED_URL")
                            or os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")).rstrip("/")
@@ -295,13 +297,18 @@ class RagKnowledgeProvider(KnowledgeProvider):
 
     def _search(self, query: str, full_text: str) -> str:
         """三路召回后取并集、去重、按原文顺序输出。结果为空则回退全文。"""
-        # 语义通路
+        # 语义通路：top-k 内再按相对阈值过滤（P2-7）——分数 ≤0 或低于 top1×RAG_SCORE_RATIO
+        # 的 chunk 视为凑数噪声丢弃。小库上不足 k 个真相关时不再硬凑；全体皆噪声（top1≈0）
+        # 时语义通路自然为空，关键词/常驻/全文回退三条防线兜底，行为不劣化。
         query_emb = self._embed_batch([query])[0]
         q = _normalize(query_emb)
         scores = [sum(a * b for a, b in zip(q, emb)) for emb in self._embeddings]
         indexed_scores = list(enumerate(scores))
         indexed_scores.sort(key=lambda x: x[1], reverse=True)
-        semantic_indices = {idx for idx, _ in indexed_scores[:self._top_k]}
+        top1 = indexed_scores[0][1] if indexed_scores else 0.0
+        floor = top1 * self._score_ratio
+        semantic_indices = {idx for idx, sc in indexed_scores[:self._top_k]
+                            if sc > 0 and sc >= floor}
 
         # 关键词/子串通路
         keyword_indices: set[int] = set()
