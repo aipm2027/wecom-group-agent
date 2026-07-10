@@ -6,7 +6,9 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.llm_handler import ESCALATE_TAG, LLMHandler
+from core.llm_handler import (ESCALATE_TAG, REASON_AFTER_SALES, REASON_ASK_HUMAN,
+                              REASON_EMOTION, REASON_LLM_JUDGED, LLMHandler,
+                              classify_escalation)
 from core.message import Message
 from core.router import Router
 from core.session import SessionStore
@@ -91,6 +93,45 @@ def test_take_over_and_release() -> None:
     assert not s.human_controlled and not s.needs_human
 
 
+def test_classify_escalation_labels() -> None:
+    """规则层分类（P1-3）：三类标签可区分、咨询类问题不误召。"""
+    assert classify_escalation("转人工,我要找真人") == REASON_ASK_HUMAN
+    assert classify_escalation("我要退款,东西不想要了") == REASON_AFTER_SALES
+    assert classify_escalation("你们就是骗子,我要去12315举报") == REASON_EMOTION
+    # 误召方向：政策咨询/查价/砍价都不该触发规则层
+    assert classify_escalation("已经拆封了还能退吗") is None
+    assert classify_escalation("每日坚果礼盒 30 包现在什么价?") is None
+    assert classify_escalation("再便宜点,不然我不买了") is None
+
+
+def test_rule_escalates_even_without_llm_tag() -> None:
+    """漏召防线：客户消息命中规则关键词时，即使 LLM 忘打标记也硬触发转人工+结构化原因。"""
+    h = LLMHandler(transport=lambda m: "亲,收到,马上帮您看看哈~")  # LLM 没打标记
+    s = SessionStore().get("u1")
+    s.add(_msg(content="我要退款,你们发的坚果发霉了"))
+    h.reply(s.history[-1], s)
+    assert s.needs_human is True, "规则层应硬触发转人工"
+    label, _, detail = s.escalation_reason.partition(":")
+    assert label == REASON_AFTER_SALES, f"应为售后标签,实际 {s.escalation_reason!r}"
+    assert "命中「" in detail, f"reason 应含命中关键词详情(#10 格式约定),实际 {s.escalation_reason!r}"
+
+
+def test_llm_tag_reason_refined_by_rule() -> None:
+    """LLM 打了标记时：原因优先用规则标签细分,否则落兜底标签。"""
+    h = LLMHandler(transport=lambda m: f"帮你转专属客服哈~\n{ESCALATE_TAG}")
+    # 命中"点名人工"规则 → 细分标签(reason 为「标签:命中「关键词」」格式)
+    s1 = SessionStore().get("u1")
+    s1.add(_msg(content="别机器人了,给我转人工"))
+    h.reply(s1.history[-1], s1)
+    assert s1.escalation_reason.partition(":")[0] == REASON_ASK_HUMAN
+    # 规则未命中 → 兜底标签
+    s2 = SessionStore().get("u2")
+    s2.add(_msg(chat_id="u2", content="我这个订单的情况有点复杂,你帮我看看"))
+    h.reply(s2.history[-1], s2)
+    assert s2.needs_human is True
+    assert s2.escalation_reason == REASON_LLM_JUDGED
+
+
 def main() -> None:
     for fn in (
         test_escalate_tag_stripped_and_flagged,
@@ -98,6 +139,9 @@ def main() -> None:
         test_router_fires_escalation_callback,
         test_router_normal_reply_regression,
         test_take_over_and_release,
+        test_classify_escalation_labels,
+        test_rule_escalates_even_without_llm_tag,
+        test_llm_tag_reason_refined_by_rule,
     ):
         fn()
         print(f"通过: {fn.__name__}")

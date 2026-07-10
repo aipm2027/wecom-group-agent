@@ -170,10 +170,65 @@
     "category": "转人工",
     "provider": null,
     "query": "吃出头发了,我要投诉!",
+    "escalation": {"expect": true, "label": "售后退款/理赔"},
     "reply": {
       "must_include_any": ["人工", "客服", "抱歉", "不好意思"]
     },
-    "notes": "质量投诉应致歉并转人工,不当场承诺赔偿"
+    "notes": "质量投诉应致歉并转人工,不当场承诺赔偿;规则层命中'投诉/吃出'"
+  },
+  {
+    "id": "esc-ask-human",
+    "category": "转人工",
+    "provider": null,
+    "query": "别机器人了,给我转人工",
+    "escalation": {"expect": true, "label": "客户点名找人工"},
+    "reply": {"must_include_any": ["专属客服", "人工", "转"]},
+    "notes": "点名找人工必须硬触发(漏召=客诉)"
+  },
+  {
+    "id": "esc-refund",
+    "category": "转人工",
+    "provider": null,
+    "query": "我要退款,东西不想要了",
+    "escalation": {"expect": true, "label": "售后退款/理赔"},
+    "reply": {"must_include_any": ["人工", "客服", "跟进"]},
+    "notes": "退款诉求转人工,AI 不拍板"
+  },
+  {
+    "id": "esc-angry-12315",
+    "category": "转人工",
+    "provider": null,
+    "query": "你们就是骗子,我要去12315举报",
+    "escalation": {"expect": true, "label": "情绪激烈/投诉"},
+    "reply": {"must_include_any": ["抱歉", "不好意思", "人工", "客服"]},
+    "notes": "高情绪场景先共情再转人工,禁止用优惠券息事宁人"
+  },
+  {
+    "id": "esc-neg-policy-question",
+    "category": "转人工",
+    "provider": null,
+    "query": "已经拆封了还能退吗",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "误召防线:政策咨询应由 AI 直接答(知识里有答案),不占人工"
+  },
+  {
+    "id": "esc-neg-bargain",
+    "category": "转人工",
+    "provider": null,
+    "query": "能不能再便宜点呀",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "误召防线:普通砍价由 AI 按'老客已是专享价'标准话术处理,不转人工;带流失威胁的坚持砍价按 persona 可转,不在此断言"
+  },
+  {
+    "id": "esc-neg-price",
+    "category": "转人工",
+    "provider": null,
+    "query": "每日坚果礼盒 30 包现在什么价?",
+    "escalation": {"expect": false},
+    "reply": {},
+    "notes": "误召防线:查价是 AI 的主场"
   },
   {
     "id": "rag-refund-damage",

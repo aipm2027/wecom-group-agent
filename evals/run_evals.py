@@ -1,13 +1,13 @@
 """回复质量评测(evals)。
 
 两种模式:
-- 离线(默认,CI 跑这个):只评**知识检索层** —— 各 KnowledgeProvider 对金标 query
-  的召回是否包含/排除指定内容。RAG 通路注入**确定性本地 embedding**(字符 bigram
-  哈希装桶),不联网、跨平台可复现,真实走"切块→向量→三路召回→并集"全链路,
-  而不是只测降级路径。
+- 离线(默认,CI 跑这个):评**知识检索层**(各 KnowledgeProvider 对金标 query 的召回
+  断言)+ **转人工规则层准召**(classify_escalation 的漏召/误召双向断言,确定性)。
+  RAG 通路注入**确定性本地 embedding**(字符 bigram 哈希装桶),不联网、跨平台可复现,
+  真实走"切块→向量→三路召回→并集"全链路,而不是只测降级路径。
 - 在线(--online,需 .env 的 LLM_API_KEY):额外把 query 喂给真实 LLMHandler,
-  对最终回复做 must_include_any / must_not_include 断言(合规红线/转人工等
-  只有回复层才能测的案例,离线模式下记为跳过)。
+  对最终回复做 must_include_any / must_not_include 断言,并核对 session 的
+  needs_human / escalation_reason 与 escalation 声明一致(LLM 层准召)。
 
 金标集在 evals/golden.json,案例结构见其中注释字段 notes。
 
@@ -31,6 +31,12 @@ sys.path.insert(0, _ROOT)
 from core.knowledge import (HybridKnowledgeProvider, KnowledgeProvider,
                             RagKnowledgeProvider, StaticKnowledgeProvider,
                             StructuredKnowledgeProvider)
+from core.llm_handler import (REASON_AFTER_SALES, REASON_ASK_HUMAN,
+                              REASON_EMOTION, REASON_LLM_JUDGED,
+                              classify_escalation)
+
+# golden.json 中 escalation.label 只允许这些值——与 core 常量同源,防文案各自漂移(#10 约定)
+_KNOWN_LABELS = {REASON_ASK_HUMAN, REASON_AFTER_SALES, REASON_EMOTION, REASON_LLM_JUDGED}
 
 _GOLDEN_PATH = os.path.join(_HERE, "golden.json")
 _EMBED_DIM = 4096  # 桶多碰撞少,bigram 重叠的排序保真度更高(纯本地,维度大也不慢)
@@ -87,6 +93,27 @@ def _check(text: str, spec: dict) -> list[str]:
     return problems
 
 
+def _check_escalation_offline(query: str, spec: dict) -> list[str]:
+    """转人工规则层准召(离线,确定性):expect=true 要求规则命中且标签一致(防漏召);
+    expect=false 要求规则不触发(防误召)。LLM 层的准召在 --online 模式核对 session。"""
+    problems: list[str] = []
+    want = spec.get("label", "")
+    if want and want not in _KNOWN_LABELS:
+        return [f"golden.json 标签不在常量集: {want!r}(合法值: {sorted(_KNOWN_LABELS)})"]
+    got = classify_escalation(query)
+    if spec.get("expect"):
+        if got is None:
+            # 规则层未命中但案例声明应转人工:若声明允许 LLM 兜底(label 为兜底标签)则不算失败
+            if want and want != "AI 判定复杂场景":
+                problems.append(f"规则层漏召: 期望标签 {want!r},实际未触发")
+        elif want and got != want:
+            problems.append(f"规则层标签不符: 期望 {want!r},实际 {got!r}")
+    else:
+        if got is not None:
+            problems.append(f"规则层误召: 不应触发,实际命中 {got!r}")
+    return problems
+
+
 def _build_llm_reply_fn():
     """在线模式:构造真实 LLMHandler(hybrid 知识,与生产推荐形态一致)。"""
     try:
@@ -104,13 +131,13 @@ def _build_llm_reply_fn():
 
     handler = LLMHandler(knowledge=build_provider("hybrid"))
 
-    def reply_fn(case_id: str, query: str) -> str:
+    def reply_fn(case_id: str, query: str):
         session = Session(chat_id=f"eval-{case_id}")
         msg = Message(chat_id=session.chat_id, chat_type="group",
                       msg_id=f"eval-{case_id}-m1", sender_id="eval-user",
                       sender_name="评测客户", content=query)
         session.add(msg)
-        return handler.reply(msg, session) or ""
+        return handler.reply(msg, session) or "", session
 
     return reply_fn
 
@@ -148,16 +175,32 @@ def main() -> int:
             problems += [f"检索({kind}): {p}" for p in ps]
             ran_anything = True
 
-        # ── 回复层(在线) ──
-        if reply_fn is not None and case.get("reply"):
-            reply = reply_fn(cid, query)
+        # ── 转人工规则层准召(离线) ──
+        esc = case.get("escalation")
+        if esc is not None:
+            problems += [f"转人工: {p}" for p in _check_escalation_offline(query, esc)]
+            ran_anything = True
+
+        # ── 回复层(在线;有 reply 或 escalation 声明的案例都要过真实 LLM) ──
+        if reply_fn is not None and (case.get("reply") or esc is not None):
+            reply, session = reply_fn(cid, query)
             if not reply.strip():
                 problems.append("回复: 为空")
             else:
-                ps = _check(reply, case["reply"])
+                ps = _check(reply, case.get("reply") or {})
                 if ps and args.verbose:
                     print(f"    [回复原文] {reply}\n", file=sys.stderr)
                 problems += [f"回复: {p}" for p in ps]
+            # LLM 层准召:核对真实 session 的转人工旗标与声明一致
+            if esc is not None:
+                if esc.get("expect") and not session.needs_human:
+                    problems.append("转人工(在线): 漏召,needs_human 未置真")
+                if not esc.get("expect") and session.needs_human:
+                    problems.append(f"转人工(在线): 误召,reason={session.escalation_reason!r}")
+                want = esc.get("label", "")
+                got_label = session.escalation_reason.partition(":")[0]  # reason 格式「标签:详情」
+                if esc.get("expect") and session.needs_human and want and got_label != want:
+                    problems.append(f"转人工(在线): 标签不符,期望 {want!r} 实际 {session.escalation_reason!r}")
             ran_anything = True
 
         if not ran_anything:

@@ -25,6 +25,45 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 转人工控制标记：模型决定转人工时在回复末尾追加，会被剥离后再发给客户
 ESCALATE_TAG = "[[转人工]]"
 
+# ── 转人工结构化原因（P1-3）────────────────────────────────────
+# 规则层三类标签：确定性、离线可评测；命中即硬触发转人工（对齐 persona 的触发条款，
+# 防 LLM 漏打标记造成漏召）。都未命中而 LLM 打了标记时，落到兜底标签。
+REASON_ASK_HUMAN = "客户点名找人工"
+REASON_AFTER_SALES = "售后退款/理赔"
+REASON_EMOTION = "情绪激烈/投诉"
+REASON_LLM_JUDGED = "AI 判定复杂场景"
+
+# 关键词取"精确短语优先"：宁可漏给 LLM 兜底，也不误伤咨询类问题
+# （如"拆封了还能退吗"是政策咨询，不含"退款/退货"，不触发）。
+_ESCALATION_RULES: tuple = (
+    (REASON_ASK_HUMAN, ("转人工", "找人工", "人工客服", "叫人工", "有人工", "要人工",
+                        "真人", "活人", "客服呢", "别机器人", "不要机器人")),
+    (REASON_AFTER_SALES, ("退款", "退货", "退钱", "赔偿", "理赔", "赔付", "投诉", "维权",
+                          "破损", "漏发", "少发", "发霉", "变质", "过期", "吃出", "质量问题")),
+    (REASON_EMOTION, ("骗子", "骗人", "垃圾", "太差", "什么破", "气死", "曝光", "举报",
+                      "12315", "工商", "市场监管", "律师", "起诉")),
+)
+
+
+def _match_escalation(query: str):
+    """规则层匹配:命中返回 (标签, 命中关键词),未命中返回 None。"""
+    for label, keywords in _ESCALATION_RULES:
+        for kw in keywords:
+            if kw in query:
+                return label, kw
+    return None
+
+
+def classify_escalation(query: str) -> str | None:
+    """规则层转人工分类：命中返回标签（同时作为硬触发信号），未命中返回 None。
+
+    evals 的准召评测直接调用本函数做离线断言（误召/漏召两个方向）。
+    session.escalation_reason 的完整格式为「标签:命中「关键词」」(#10 约定:
+    冒号前缀可扫可聚合)，本函数只返回标签部分。
+    """
+    m = _match_escalation(query)
+    return m[0] if m else None
+
 
 class LLMHandler(Handler):
     """用 LLM 生成回复，支持多轮历史上下文。
@@ -108,15 +147,32 @@ class LLMHandler(Handler):
         return self._postprocess(text, session)
 
     def _postprocess(self, text: str, session: Session) -> str:
-        """剥离转人工控制标记并在 session 上打"需人工"标记，返回可直接发送的干净文本。
+        """剥离转人工控制标记、结构化转人工原因，返回可直接发送的干净文本。
+
+        转人工判定双通道（P1-3）：
+        - 规则层：当前客户消息命中 classify_escalation 关键词 → 硬触发 + 结构化标签
+          （即使 LLM 忘打标记也不漏召）；
+        - LLM 层：回复含 ESCALATE_TAG → 触发；原因优先用规则标签细分，否则落兜底标签。
 
         剥离后若为空/纯空白（模型只回了标记或空响应），统一回退兜底话术，避免给客户发空白消息。
         """
+        rule_hit = _match_escalation(self._latest_customer_text(session))
+        rule_reason = f"{rule_hit[0]}:命中「{rule_hit[1]}」" if rule_hit else ""
         if text and ESCALATE_TAG in text:
-            session.mark_needs_human("agent 判定需人工介入")
+            session.mark_needs_human(rule_reason or REASON_LLM_JUDGED)
             text = text.replace(ESCALATE_TAG, "")
+        elif rule_hit:
+            session.mark_needs_human(rule_reason)
         text = (text or "").strip()
         return text or self._fallback
+
+    @staticmethod
+    def _latest_customer_text(session: Session) -> str:
+        """取最近一条客户消息内容（Router 调 reply 前已把当前消息 add 进 history）。"""
+        for m in reversed(session.history):
+            if m.sender_id != BOT_SENDER_ID:
+                return m.content or ""
+        return ""
 
     def _build_messages(self, system: str, session: Session) -> list[dict]:
         """组装 system + 最近 N 条历史。
