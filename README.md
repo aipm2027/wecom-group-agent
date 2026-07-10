@@ -69,7 +69,7 @@ ADAPTER=aibot HANDLER=llm KNOWLEDGE_PROVIDER=hybrid STORE=sqlite python3 main.py
 # 6) 运营后台 REST API（会话/接管/试聊/指标）
 ADMIN_TOKEN=xxx API_PORT=8080 python3 api_server.py
 
-# 7) 运营管理后台 Web 工作台（浏览器操作：收件箱/接管/人工回复/试聊）
+# 7) 运营管理后台 Web 工作台（浏览器操作：待人工列表/接管/人工回复/试聊）
 ADMIN_TOKEN=xxx CONSOLE_PASSWORD=yyy python3 admin_console.py
 #    打开 http://127.0.0.1:8090 ，口令登录（需先起 6) 的 API）
 
@@ -128,7 +128,7 @@ docker compose logs -f agent   # 看回调/自检日志
 - ✅ 可插拔知识模块：Static / RAG（混合检索）/ 结构化商品库 / Hybrid，`KNOWLEDGE_PROVIDER` 一键切换
 - ✅ 人工接管：转人工信号 + 接管静默 + REST API（`/api/queue`、takeover/release）
 - ✅ SQLite 持久化（`STORE=sqlite`，重启恢复）+ REST API 运营后台 + GitHub Actions CI（Py 3.9–3.12）
-- ✅ 运营管理后台 Web 工作台（`admin_console.py`：收件箱/接管/人工回复/试聊调试，零依赖单文件）
+- ✅ 运营管理后台 Web 工作台（`admin_console.py`：待人工列表/接管/人工回复/试聊调试，零依赖单文件）
 - ✅ 微信客服适配器（官方合规 1:1，纯 Python AES-256 回调加解密）——代码/SOP/隧道预检就绪，端到端等企业认证
 - ✅ **智能机器人适配器（官方长连接，纯标准库自实现 WebSocket）——2026-07-10 真机订阅打通、agent 在线**（企业内部单聊+群@bot，[联调实录](docs/技术文档/08-智能机器人长连接与真机联调实录.md)）
 - ⏳ 真实企微群 hook（`ntwork`）——P2 远期（群聊诉求已被智能机器人官方通道部分覆盖）

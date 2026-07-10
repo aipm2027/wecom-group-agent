@@ -7,6 +7,7 @@ import os
 import socket
 import sys
 import threading
+import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -195,6 +196,40 @@ def test_missing_env_raises() -> None:
     print("test_missing_env_raises ok")
 
 
+def test_outbox_bridge_roundtrip() -> None:
+    """人工回复跨进程桥接:无 ws 进程 send→入 outbox;有 ws 的 agent 轮询代发并清队列。"""
+    import tempfile
+    tf = tempfile.mktemp(suffix=".jsonl")
+    os.environ["WECOM_AIBOT_OUTBOX"] = tf
+    try:
+        # ① api_server 侧(无长连接):send 不再抛错,而是入 outbox
+        offline_side = WecomAibotAdapter(ws_factory=lambda: None)
+        offline_side.send("aibot-single-zhang", "人工:已帮你补发")
+        with open(tf, encoding="utf-8") as f:
+            queued = [json.loads(ln) for ln in f.read().splitlines()]
+        assert queued and queued[0]["chat_id"] == "aibot-single-zhang", queued
+
+        # ② agent 侧(有 ws + 回调上下文):_drain_outbox 经真实下发分支代发
+        ws = FakeWS([])
+        agent_side = WecomAibotAdapter(ws_factory=lambda: ws)
+        agent_side._ws = ws
+        agent_side._reply_ctx["aibot-single-zhang"] = ("req-1", time.time())
+        agent_side._drain_outbox()
+        replies = [m for m in ws.sent if m.get("cmd") == "aibot_respond_msg"]
+        assert len(replies) == 1, f"应代发 1 条,实际 {len(replies)}"
+        assert replies[0]["body"]["stream"]["content"] == "人工:已帮你补发"
+        assert replies[0]["headers"]["req_id"] == "req-1", "必须透传回调 req_id"
+        assert not os.path.exists(tf) and not os.path.exists(tf + ".sending"), "队列应被清空"
+        # ③ 空队列再排一次不炸
+        agent_side._drain_outbox()
+    finally:
+        os.environ.pop("WECOM_AIBOT_OUTBOX", None)
+        for p in (tf, tf + ".sending"):
+            if os.path.exists(p):
+                os.unlink(p)
+    print("test_outbox_bridge_roundtrip ok")
+
+
 def main() -> None:
     for fn in (
         test_frame_roundtrip,
@@ -206,6 +241,7 @@ def main() -> None:
         test_send_without_context_is_noop,
         test_non_text_callback_ignored,
         test_missing_env_raises,
+        test_outbox_bridge_roundtrip,
     ):
         fn()
         print(f"通过: {fn.__name__}")

@@ -283,6 +283,7 @@ class WecomAibotAdapter(Adapter):
             if time.time() - last_ping >= _PING_INTERVAL:
                 self._send_cmd("ping")
                 last_ping = time.time()
+            self._drain_outbox()  # 桥接:下发 api_server 进程排队的人工回复(≤5s 延迟)
             try:
                 text = self._ws.recv_text()
             except socket.timeout:
@@ -323,9 +324,15 @@ class WecomAibotAdapter(Adapter):
         # errcode 响应帧(ping/回复的 ack)静默即可
 
     def send(self, chat_id: str, text: str) -> None:
-        """回复消息:透传该会话最近一次回调的 req_id,流式一次成型(finish=true)。"""
+        """回复消息:透传该会话最近一次回调的 req_id,流式一次成型(finish=true)。
+
+        跨进程桥接:没有长连接的进程(如 api_server 里的人工回复)调用本方法时,
+        消息写入 outbox 文件排队,由持有长连接的 agent 进程在 ≤5s 内代发——
+        与 WECOM_TOKEN_FILE/AGENT_STATS_FILE 同一"共享文件"模式。
+        """
         if self._ws is None:
-            raise WecomAibotError("长连接未就绪")
+            self._enqueue_outbox(chat_id, text)
+            return
         with self._ctx_lock:
             ctx = self._reply_ctx.get(chat_id)
             if ctx and time.time() - ctx[1] > 24 * 3600:  # 官方 24h 回复窗口,过期即失效
@@ -339,6 +346,55 @@ class WecomAibotAdapter(Adapter):
                        {"msgtype": "stream",
                         "stream": {"id": self._req_id(), "finish": True, "content": text}},
                        req_id=ctx[0])
+
+    # ── 人工回复跨进程桥接(outbox 文件队列) ─────────────────────
+    @staticmethod
+    def _outbox_path() -> str:
+        return os.environ.get("WECOM_AIBOT_OUTBOX", "data/aibot_outbox.jsonl")
+
+    def _enqueue_outbox(self, chat_id: str, text: str) -> None:
+        """无长连接进程侧:人工回复追加进 outbox,由在线 agent 代发。"""
+        path = self._outbox_path()
+        try:
+            d = os.path.dirname(path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"chat_id": chat_id, "text": text,
+                                    "ts": time.time()}, ensure_ascii=False) + "\n")
+            print(f"[aibot] 人工回复已入 outbox,等在线 agent 代发: {chat_id}", file=sys.stderr)
+        except OSError as exc:
+            raise WecomAibotError(f"长连接未就绪且 outbox 写入失败: {exc}")
+
+    def _drain_outbox(self) -> None:
+        """agent 进程侧:每个轮询节拍把 outbox 里的排队回复经长连接发出。
+
+        先原子改名再处理(api 侧此间的新追加会落到新文件,不丢不重);
+        单条发送失败只丢该条并记日志,不影响其余与主循环。
+        """
+        path = self._outbox_path()
+        if not os.path.exists(path):
+            return
+        working = path + ".sending"
+        try:
+            os.replace(path, working)
+        except OSError:
+            return  # 竞争/文件已被处理,下拍再看
+        try:
+            with open(working, encoding="utf-8") as f:
+                lines = [ln for ln in f.read().splitlines() if ln.strip()]
+        except OSError:
+            lines = []
+        for ln in lines:
+            try:
+                item = json.loads(ln)
+                self.send(item["chat_id"], item["text"])  # 本进程有 ws,走真实下发分支
+            except Exception as exc:  # noqa: BLE001  # 单条坏数据/发送失败不拖垮队列
+                print(f"[aibot] outbox 单条代发失败已跳过: {exc.__class__.__name__}: {exc}", file=sys.stderr)
+        try:
+            os.remove(working)
+        except OSError:
+            pass
 
     def stop(self) -> None:
         self._running = False
