@@ -321,5 +321,39 @@
     "retrieval": {"must_include": ["满 ¥199 减 ¥30"]},
     "reply": {"must_include_any": ["199", "满减", "活动"]},
     "notes": "活动章节属常驻关键块,必须召回"
+  },
+  {
+    "id": "detail-no-markdown",
+    "category": "回复细节",
+    "provider": null,
+    "query": "那个每日坚果礼盒给我详细介绍下呗",
+    "reply": {
+      "must_include_any": ["99"],
+      "must_not_include": ["**", "###", "| ---"]
+    },
+    "notes": "真机截图问题①:微信不渲染 markdown,回复里出现 ** 客户看到的是星号(persona 输出格式节已禁)"
+  },
+  {
+    "id": "detail-greeting-continuity",
+    "category": "回复细节",
+    "provider": null,
+    "turns": ["hi", "在吗"],
+    "query": "hi",
+    "reply": {
+      "must_not_include": ["hi亲~在的", "hi 亲~在的", "hi亲～在的"]
+    },
+    "notes": "真机截图问题②:连续三条招呼不该逐字复读同一开场白(多轮案例,turns 先真实跑两轮)"
+  },
+  {
+    "id": "detail-dismissive-slang",
+    "category": "回复细节",
+    "provider": null,
+    "turns": ["最近有什么推荐?"],
+    "query": "毛线",
+    "escalation": {"expect": false},
+    "reply": {
+      "must_not_include": ["没事我就放心", "那我就放心"]
+    },
+    "notes": "真机截图问题④:'毛线'是敷衍/调侃,不是'没事',不得曲解;也不该触发转人工"
   }
 ]

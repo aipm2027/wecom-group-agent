@@ -163,13 +163,24 @@ def _build_llm_reply_fn():
         sys.exit(2)
 
     from core.llm_handler import LLMHandler
-    from core.message import Message
+    from core.message import BOT_SENDER_ID, Message
     from core.session import Session
 
     handler = LLMHandler(knowledge=build_provider("hybrid"))
 
-    def reply_fn(case_id: str, query: str):
+    def reply_fn(case_id: str, query: str, prior_turns=()):
+        """跑一个案例:prior_turns 里的每条客户消息先真实过一遍 handler(bot 回复也进
+        history,模拟 Router 行为),query 是最后一轮。多轮细节(重复打招呼等)靠它评。"""
         session = Session(chat_id=f"eval-{case_id}")
+        for i, turn in enumerate(prior_turns):
+            m = Message(chat_id=session.chat_id, chat_type="group",
+                        msg_id=f"eval-{case_id}-p{i}", sender_id="eval-user",
+                        sender_name="评测客户", content=turn)
+            session.add(m)
+            bot_text = handler.reply(m, session) or ""
+            session.add(Message(chat_id=session.chat_id, chat_type="group",
+                                msg_id=f"eval-{case_id}-b{i}", sender_id=BOT_SENDER_ID,
+                                sender_name="bot", content=bot_text))
         msg = Message(chat_id=session.chat_id, chat_type="group",
                       msg_id=f"eval-{case_id}-m1", sender_id="eval-user",
                       sender_name="评测客户", content=query)
@@ -228,7 +239,7 @@ def main() -> int:
 
         # ── 回复层(在线;有 reply 或 escalation 声明的案例都要过真实 LLM) ──
         if reply_fn is not None and (case.get("reply") or esc is not None):
-            reply, session = reply_fn(cid, query)
+            reply, session = reply_fn(cid, query, case.get("turns") or ())
             if not reply.strip():
                 problems.append("回复: 为空")
             else:
