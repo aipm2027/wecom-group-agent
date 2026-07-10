@@ -42,6 +42,7 @@ make test         # 只跑 16 套离线测试
 make eval         # 离线评测(知识检索+转人工规则,无需网络)
 make eval-online  # 在线评测(真 LLM,需 .env 的 LLM_API_KEY)
 make gate         # 合规门禁:改 persona/换模型后必跑,全绿才能上线
+make up / down    # 本地三件套一键启停(机器人+接口+工作台)
 make health       # 三服务健康检查
 make run-mock     # 本地模拟聊天(不连微信,Mac 可跑)
 make help         # 全部命令
