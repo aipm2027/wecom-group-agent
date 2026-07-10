@@ -146,12 +146,36 @@ class ApiApp:
 
     def _metrics(self) -> dict:
         sessions = self.sessions.all()
-        return {
+        # 转人工原因按前缀聚合(P1-3 的 reason 格式「标签:详情」,#10 约定的可聚合性在此兑现)
+        reasons: dict = {}
+        for s in sessions:
+            if s.needs_human and s.escalation_reason:
+                label = s.escalation_reason.partition(":")[0]
+                reasons[label] = reasons.get(label, 0) + 1
+        out = {
             "conversations": len(sessions),
             "needs_human": sum(1 for s in sessions if s.needs_human),
             "human_controlled": sum(1 for s in sessions if s.human_controlled),
             "messages": sum(len(s.history) for s in sessions),
+            "escalation_by_reason": reasons,
         }
+        # agent 进程的运行时计数器(P2-8):经 AGENT_STATS_FILE 跨进程共享,未配置/未生成则缺省
+        stats_path = os.environ.get("AGENT_STATS_FILE", "")
+        if stats_path and os.path.exists(stats_path):
+            try:
+                with open(stats_path, encoding="utf-8") as f:
+                    agent = json.load(f)
+                lat_n = agent.get("latency_count") or 0
+                out["agent"] = {
+                    "replies_total": agent.get("replies_total", 0),
+                    "fallback_total": agent.get("fallback_total", 0),
+                    "escalation_marks_total": agent.get("escalation_marks_total", 0),
+                    "avg_latency_ms": int(agent.get("latency_ms_total", 0) / lat_n) if lat_n else None,
+                    "updated_at": agent.get("updated_at"),
+                }
+            except (OSError, ValueError):
+                pass  # 指标旁路,读不到就不给 agent 段
+        return out
 
     # --- 序列化 ---
     def _conv_summary(self, s: Session) -> dict:

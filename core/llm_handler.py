@@ -10,6 +10,8 @@ import os
 import re
 import socket
 import sys
+import threading
+import time
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -114,6 +116,14 @@ class LLMHandler(Handler):
         self._max_history = int(os.environ.get("LLM_MAX_HISTORY", "10"))
         self._transport = transport
         self._fallback = "不好意思，我这边有点忙，稍后回复你哈~"
+        # ── 可观测计数器(P2-8,可选)────────────────────────────
+        # AGENT_STATS_FILE 配置后,每次回复把计数器落盘(原子替换),供 api_server
+        # /api/metrics 跨进程读取。不配置 = 纯内存,零副作用(测试/本地默认)。
+        self._stats_path = os.environ.get("AGENT_STATS_FILE", "")
+        self._stats_lock = threading.Lock()
+        self._stats = {"replies_total": 0, "fallback_total": 0,
+                       "escalation_marks_total": 0,
+                       "latency_ms_total": 0, "latency_count": 0}
 
     def _compose_system(self, query: str) -> str:
         """组装 system prompt：LLM_SYSTEM_PROMPT 覆盖 > persona + 知识模块检索结果 > 内置默认。
@@ -144,6 +154,7 @@ class LLMHandler(Handler):
         system = self._compose_system(msg.content)
         messages = self._build_messages(system, session)
 
+        started = time.time()
         # transport 注入优先（离线测试/自定义后端），短路掉真实网络与 key 校验
         if self._transport is not None:
             result = self._transport(messages)
@@ -153,8 +164,11 @@ class LLMHandler(Handler):
             text = self._fallback
         else:
             text = self._call_api(messages)
+        elapsed_ms = int((time.time() - started) * 1000)
 
-        return self._postprocess(text, session)
+        out = self._postprocess(text, session)
+        self._bump_stats(elapsed_ms, degraded=(out == self._fallback))
+        return out
 
     def _postprocess(self, text: str, session: Session) -> str:
         """剥离转人工控制标记、结构化转人工原因，返回可直接发送的干净文本。
@@ -170,9 +184,11 @@ class LLMHandler(Handler):
         rule_reason = f"{rule_hit[0]}:命中「{rule_hit[1]}」" if rule_hit else ""
         if text and ESCALATE_TAG in text:
             session.mark_needs_human(rule_reason or REASON_LLM_JUDGED)
+            self._stats["escalation_marks_total"] += 1
             text = text.replace(ESCALATE_TAG, "")
         elif rule_hit:
             session.mark_needs_human(rule_reason)
+            self._stats["escalation_marks_total"] += 1
         text = (text or "").strip()
         return text or self._fallback
 
@@ -183,6 +199,28 @@ class LLMHandler(Handler):
             if m.sender_id != BOT_SENDER_ID:
                 return m.content or ""
         return ""
+
+    def _bump_stats(self, elapsed_ms: int, degraded: bool) -> None:
+        """更新可观测计数器；配置了 AGENT_STATS_FILE 则原子落盘（失败不影响回复主流程）。"""
+        with self._stats_lock:
+            self._stats["replies_total"] += 1
+            if degraded:
+                self._stats["fallback_total"] += 1
+            self._stats["latency_ms_total"] += elapsed_ms
+            self._stats["latency_count"] += 1
+            if not self._stats_path:
+                return
+            snapshot = dict(self._stats, updated_at=int(time.time()))
+        try:
+            d = os.path.dirname(self._stats_path)
+            if d:
+                os.makedirs(d, exist_ok=True)
+            tmp = self._stats_path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, ensure_ascii=False)
+            os.replace(tmp, self._stats_path)
+        except OSError:
+            pass  # 指标是旁路，绝不因落盘失败影响客服回复
 
     def _build_messages(self, system: str, session: Session) -> list[dict]:
         """组装 system + 最近 N 条历史。
