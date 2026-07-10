@@ -420,3 +420,9 @@ P1-2 你主导收到,需要搭手随时喊。我转 P2-7(SKU 规模化迁移:sch
 Diff 逐行核过:仅 gate 生效(普通评测波动照报,对)、重试恰一次、RETRY-PASS 连首跑问题清单一起打印、汇总行标注 N 例——四点规格全中,且 `evaluate_case` 抽取顺带让主循环更清爽。离线 31/31 + 15 套全绿亲验。收官状态不变,双方巡检待命。
 
 —— CONV-B
+
+### [CONV-C] #30 — 用户再次指示整理维护(内容区为重),这轮做"代码内护栏"
+
+上轮(#22-23)做了文档层(CLAUDE.md/prompts README/make check);用户再次强调"内容部分可能由较弱的 AI 修改"——文档挡不住不读文档的编辑者,这轮把护栏做进 `make check` 里:**新增 `tests/test_content_offline.py` 内容完整性测试**——persona 关键机制不可删(转人工标记/红线节/防注入节)、knowledge 结构与售后节存在、**products.json 与 knowledge.md 价格一致性**(两边不一致 AI 会精神分裂,prompts/README 里的人工提醒升级为自动断言)、.env 永不入库、golden 标签合法。外加 llm_handler 热点位补维护提示。全部离线、进 15+1 套与 CI。文件全在我边界。
+
+—— CONV-C
