@@ -194,8 +194,8 @@ class WecomAibotAdapter(Adapter):
         self._ws_factory = ws_factory or (lambda: _WSClient(self.ws_url))
         self._ws: "_WSClient | None" = None
         self._running = False
-        # 被动回复需要透传回调 req_id:记每个会话最近一次回调的 req_id
-        self._reply_ctx: dict[str, str] = {}
+        # 被动回复需要透传回调 req_id:记每会话最近一次回调的 (req_id, 时间戳)
+        self._reply_ctx: dict[str, tuple[str, float]] = {}
         self._ctx_lock = threading.Lock()
 
     # -- 协议帧 --
@@ -212,10 +212,13 @@ class WecomAibotAdapter(Adapter):
 
     def _subscribe(self) -> None:
         self._send_cmd("aibot_subscribe", {"bot_id": self.bot_id, "secret": self.secret})
-        # 等订阅响应(期间的协议 ping 已由 _WSClient 处理)
+        # 等订阅响应至多 15s:socket 超时(构造时 10s)在环内接住重试,不穿透到重连逻辑
         deadline = time.time() + 15
         while time.time() < deadline:
-            text = self._ws.recv_text()
+            try:
+                text = self._ws.recv_text()
+            except socket.timeout:
+                continue
             if text is None:
                 raise WecomAibotError("订阅期间连接被关闭")
             data = json.loads(text)
@@ -235,11 +238,14 @@ class WecomAibotAdapter(Adapter):
         # 单聊回调无 chatid:以发送者为会话键,保证同一用户同一会话
         chat_id = body.get("chatid") or f"aibot-single-{userid}"
         content = (body.get("text") or {}).get("content") or ""
-        # 群聊里内容形如 "@咕咕嘎嘎 问题正文",剥掉开头的 @机器人 提及
+        # 群聊里内容形如 "@咕咕嘎嘎 问题正文":剥掉开头的 @机器人 提及。
+        # 企微 @提及 后常跟 U+2005(四分之一空铛)而非普通空格,一并处理;无分隔符时保留原文。
         if content.startswith("@"):
-            head, _, rest = content.partition(" ")
-            if rest:
-                content = rest
+            for sep in (" ", " ", "　"):
+                _, s, rest = content.partition(sep)
+                if s and rest:
+                    content = rest
+                    break
         return Message(
             chat_id=chat_id, chat_type="group" if chattype == "group" else "single",
             msg_id=body.get("msgid") or self._req_id(), sender_id=userid,
@@ -299,7 +305,11 @@ class WecomAibotAdapter(Adapter):
             if msg is None:
                 return
             with self._ctx_lock:
-                self._reply_ctx[msg.chat_id] = req_id
+                self._reply_ctx[msg.chat_id] = (req_id, time.time())
+                if len(self._reply_ctx) > 1024:  # 上下文只增会漏:顺手剔除超 24h 窗口的过期项
+                    cutoff = time.time() - 24 * 3600
+                    for k in [k for k, (_, ts) in self._reply_ctx.items() if ts < cutoff]:
+                        del self._reply_ctx[k]
             try:
                 on_message(msg)
             except Exception as exc:  # noqa: BLE001  # 业务异常不拖垮长连接
@@ -317,15 +327,18 @@ class WecomAibotAdapter(Adapter):
         if self._ws is None:
             raise WecomAibotError("长连接未就绪")
         with self._ctx_lock:
-            req_id = self._reply_ctx.get(chat_id)
-        if not req_id:
+            ctx = self._reply_ctx.get(chat_id)
+            if ctx and time.time() - ctx[1] > 24 * 3600:  # 官方 24h 回复窗口,过期即失效
+                del self._reply_ctx[chat_id]
+                ctx = None
+        if not ctx:
             # 24h 窗口内无回调上下文(如纯人工主动发起):MVP 暂不支持主动推送
             print(f"[aibot] 会话 {chat_id} 无回复上下文(需先有用户消息),本条未发送", file=sys.stderr)
             return
         self._send_cmd("aibot_respond_msg",
                        {"msgtype": "stream",
                         "stream": {"id": self._req_id(), "finish": True, "content": text}},
-                       req_id=req_id)
+                       req_id=ctx[0])
 
     def stop(self) -> None:
         self._running = False
