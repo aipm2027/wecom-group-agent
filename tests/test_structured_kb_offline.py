@@ -206,6 +206,38 @@ def test_smoke_static_and_rag() -> None:
     assert r is not None
 
 
+# ---------------------------------------------------------------------------
+# schema 校验（P2-7）
+# ---------------------------------------------------------------------------
+
+def test_validate_products_schema() -> None:
+    """坏条目逐条报错并跳过,好条目保留;根不是数组/重复 ID/status 未知都有提示。"""
+    from core.knowledge import validate_products
+    good = {"product_id": "S1", "name": "A", "price": 10}
+    valid, problems = validate_products([
+        good,
+        {"name": "缺ID", "price": 1},                       # 缺 product_id
+        {"product_id": "S2", "name": "价格是串", "price": "9"},  # price 类型错
+        "不是对象",                                          # 非 dict
+        {"product_id": "S1", "name": "重复ID", "price": 2},   # 重复 ID(保留但提示)
+        {"product_id": "S3", "name": "怪状态", "price": 3, "status": "sold_out"},  # 未知 status
+        {"product_id": "S4", "name": "坏关键词", "price": 4, "keywords": "不是数组"},  # keywords 类型错
+    ])
+    ids = [p["product_id"] for p in valid]
+    assert ids == ["S1", "S1", "S3", "S4"], f"好条目应保留,实际 {ids}"
+    assert len(problems) == 6, f"应报 6 条问题(缺ID/价格类型/非对象/重复ID/未知status/坏keywords),实际 {len(problems)}: {problems}"
+    assert valid[3]["keywords"] == [], "坏 keywords 应被清空而非整条丢弃"
+    # 根不是数组
+    valid2, problems2 = validate_products({"product_id": "x"})
+    assert valid2 == [] and problems2, "根不是数组应整体报错"
+
+
+def test_validate_products_file_real_sample() -> None:
+    """仓库自带的样例 products.json 必须零问题(样例即标杆)。"""
+    from core.knowledge import validate_products_file
+    assert validate_products_file() == [], "样例商品文件不应有 schema 问题"
+
+
 def main() -> None:
     for fn in (
         test_hit_by_name_or_keyword,
@@ -219,6 +251,8 @@ def main() -> None:
         test_hybrid_only_fallback,
         test_hybrid_primary_crash,
         test_smoke_static_and_rag,
+        test_validate_products_schema,
+        test_validate_products_file_real_sample,
     ):
         fn()
         print(f"通过: {fn.__name__}")

@@ -33,6 +33,62 @@ _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _RESIDENT_KEYWORDS = ("活动", "主推", "优惠", "促销", "满减", "折扣", "特价", "限时")
 _STATUS_MAP = {"on_sale": "在售", "off_sale": "已下架", "out_of_stock": "已售罄"}
 
+# ── 商品库 schema 校验（P2-7）──────────────────────────────────
+# 轻量逐条校验：坏条目跳过并逐条报错（含下标/ID），好条目照常服务——
+# 不再"一条脏数据无从发现"，也绝不因个别条目损坏而整库不可用。
+_PRODUCT_REQUIRED = (("product_id", str), ("name", str), ("price", (int, float)))
+
+
+def validate_products(data) -> "tuple[list[dict], list[str]]":
+    """校验商品数组，返回 (有效条目, 问题清单)。供加载路径与启动自检复用。"""
+    problems: list[str] = []
+    if not isinstance(data, list):
+        return [], ["JSON 根不是数组（应为商品对象的列表）"]
+    valid: list[dict] = []
+    seen_ids: set = set()
+    for i, item in enumerate(data):
+        where = f"第 {i + 1} 条"
+        if not isinstance(item, dict):
+            problems.append(f"{where}: 不是对象，已跳过")
+            continue
+        pid = item.get("product_id")
+        if isinstance(pid, str) and pid:
+            where = f"第 {i + 1} 条({pid})"
+        bad = False
+        for field, typ in _PRODUCT_REQUIRED:
+            v = item.get(field)
+            if v is None or v == "" or not isinstance(v, typ) or isinstance(v, bool):
+                problems.append(f"{where}: 必填字段 {field} 缺失或类型不对，已跳过")
+                bad = True
+        if bad:
+            continue
+        kws = item.get("keywords")
+        if kws is not None and (not isinstance(kws, list)
+                                or any(not isinstance(k, str) for k in kws)):
+            problems.append(f"{where}: keywords 应为字符串数组，该字段已忽略")
+            item = dict(item, keywords=[])
+        status = item.get("status", "")
+        if status and status not in _STATUS_MAP:
+            problems.append(f"{where}: status={status!r} 不在已知取值 {sorted(_STATUS_MAP)}（保留原样，展示为原文）")
+        if item["product_id"] in seen_ids:
+            problems.append(f"{where}: product_id 重复（两条都会参与检索，请检查数据源）")
+        seen_ids.add(item["product_id"])
+        valid.append(item)
+    return valid, problems
+
+
+def validate_products_file(path: str = "prompts/products.json") -> "list[str]":
+    """校验商品文件，返回问题清单（空=干净）。给 main.check_config 启动自检用。"""
+    real = _resolve_path(path)
+    try:
+        with open(real, encoding="utf-8") as f:
+            data = json.load(f)
+    except OSError as exc:
+        return [f"商品文件读不到: {exc}"]
+    except json.JSONDecodeError as exc:
+        return [f"商品文件 JSON 语法错误（整库将不可用）: {exc}"]
+    return validate_products(data)[1]
+
 
 def _resolve_path(path: str) -> str:
     """相对路径按项目根解析，绝对路径原样返回。"""
@@ -340,9 +396,10 @@ class StructuredKnowledgeProvider(KnowledgeProvider):
         try:
             with open(self._path, encoding="utf-8") as f:
                 data = json.load(f)
-            if isinstance(data, list):
-                return data
-            print("[StructuredKnowledgeProvider] JSON 根不是数组，视为空列表", file=sys.stderr)
+            valid, problems = validate_products(data)
+            for p in problems:
+                print(f"[StructuredKnowledgeProvider] {p}", file=sys.stderr)
+            return valid
         except (OSError, json.JSONDecodeError) as exc:
             print(f"[StructuredKnowledgeProvider] 读取商品文件失败，已降级为空列表: {exc}", file=sys.stderr)
         except Exception as exc:
