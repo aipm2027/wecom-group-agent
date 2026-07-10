@@ -3,7 +3,7 @@
 
 PY ?= python3
 
-.PHONY: help test eval compile run-mock demo api console docker-build docker-up docker-down docker-logs
+.PHONY: help test eval compile run-mock demo api console health docker-build docker-up docker-down docker-logs
 
 help: ## 列出所有命令
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,9 @@ api: ## 启动运营 REST API(默认 127.0.0.1:8080)
 
 console: ## 启动 Web 工作台(默认 127.0.0.1:8090 → API :8080)
 	$(PY) admin_console.py
+
+health: ## 一键健康检查:api/console/agent 三服务 ready(compose up 后可加 -- --wait 60)
+	$(PY) healthcheck.py
 
 docker-build: ## 构建镜像
 	docker build -t wecom-group-agent .
